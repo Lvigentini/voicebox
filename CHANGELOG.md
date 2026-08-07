@@ -7,6 +7,72 @@
 
 ## [Unreleased]
 
+### Organising voices and clips
+
+- **Voices list in folders.** The Generate tab lists voices as two-line rows — name,
+  language and trait badges above, description below — so clones that differ only by a
+  suffix are finally distinguishable at a glance. Cards remain behind a toggle that is
+  remembered across restarts. Voices group into flat folders; generated clips get a
+  nested folder tree with a filter that rolls a parent's subfolders together.
+  Deleting a folder never deletes what is inside it: members become uncategorised and
+  subfolders rise one level.
+- **Duplicate a voice in one step.** `POST /profiles/{id}/duplicate` copies the samples,
+  avatar, personality, effects chain, default engine and preset fields. The
+  export/import round-trip people used before this carried only name, description and
+  language, so it silently dropped everything else — and refused voices with no samples,
+  which is every preset voice.
+
+### Story timeline
+
+- **Imported audio behaves like a music bed.** Dropping an audio file into a story used
+  to append it to the voice lane, so the music played *after* the narration instead of
+  underneath it. Imports now land on their own empty lane at the start of the timeline.
+- **The mixdown is stereo, at the sources' own sample rate.** It previously flattened
+  every clip to 24 kHz mono, which cost an imported bed everything above 12 kHz and
+  folded its stereo image flat. Each lane now renders to its own buffer before being
+  summed — which is also what makes ducking possible, and where track gain, mute and
+  solo apply.
+- **Per-lane mixer.** Lanes are persisted and gain a name, volume, mute, solo and an
+  optional duck-under-lane that pulls a bed down while another lane is speaking. Lanes
+  added in the editor also survive a reload now.
+- **Per-clip fades and speed.** Linear fade in/out, and a pitch-preserving speed control.
+  A re-timed clip changes its own length without shifting its neighbours, the same way
+  trimming already behaved.
+- **Export to MP3, OGG, Opus and FLAC** alongside WAV, written by the libsndfile already
+  bundled with the app. With ffmpeg on `PATH`, exports can additionally be loudness
+  normalised to EBU R128 — useful when clips from different voices land at different
+  levels. Every ffmpeg-backed path falls back cleanly when it is absent, and
+  `GET /health` now reports `ffmpeg_available`.
+
+### Organising, continued
+
+- **Folders for stories**, nested like clip folders, with the same filter tree.
+  Selecting a parent shows everything beneath it.
+- **Drag items into folders.** Voices, clips and stories can be dragged onto a folder
+  header, or onto Uncategorised to unfile them. The menu route still works; dragging is
+  simply faster than opening a menu and hunting for a target.
+- Folder headers now sit on a shaded, bordered strip in bold with the count in a pill,
+  so a folder no longer looks like just another row in the list.
+
+### Timeline editing
+
+- **Clicking a clip selects it.** Previously a press entered drag mode immediately and
+  the release committed a move, so a plain click could drop a clip on a neighbouring
+  track. A press now needs to travel a few pixels before it counts as a drag. The drag
+  maths also ignored the timeline's vertical scroll, which mis-targeted lanes once the
+  track area was scrolled.
+- **Snapping**, on by default, joins a dragged clip flush to its neighbours. The radius
+  is measured in screen pixels, so it feels the same at every zoom level.
+- **Ripple move**, off by default: dragging a clip carries everything later on the same
+  track, so inserting an intro pushes the track along instead of leaving a hole.
+- **Per-lane import and remove.** A lane could be added but never removed, and there was
+  no way to place audio on a specific lane — the story-level import always picks a free
+  lane at the start, which is wrong for a stinger partway in. Remove only offers itself
+  on empty lanes, so it can never take clips with it.
+- **Exact clip timing.** Right-click a clip to type a target length or a speed
+  multiplier; the two are views of one number and each recomputes the other. A live
+  seconds readout appears above a clip while trimming.
+
 ### Linux
 
 - **ROCm setup works on Linux AMD systems.** Docker ROCm builds now keep PyTorch
