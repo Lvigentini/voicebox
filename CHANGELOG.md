@@ -7,6 +7,43 @@
 
 ## [Unreleased]
 
+### Organising voices and clips
+
+- **Voices list in folders.** The Generate tab lists voices as two-line rows — name,
+  language and trait badges above, description below — so clones that differ only by a
+  suffix are finally distinguishable at a glance. Cards remain behind a toggle that is
+  remembered across restarts. Voices group into flat folders; generated clips get a
+  nested folder tree with a filter that rolls a parent's subfolders together.
+  Deleting a folder never deletes what is inside it: members become uncategorised and
+  subfolders rise one level.
+- **Duplicate a voice in one step.** `POST /profiles/{id}/duplicate` copies the samples,
+  avatar, personality, effects chain, default engine and preset fields. The
+  export/import round-trip people used before this carried only name, description and
+  language, so it silently dropped everything else — and refused voices with no samples,
+  which is every preset voice.
+
+### Story timeline
+
+- **Imported audio behaves like a music bed.** Dropping an audio file into a story used
+  to append it to the voice lane, so the music played *after* the narration instead of
+  underneath it. Imports now land on their own empty lane at the start of the timeline.
+- **The mixdown is stereo, at the sources' own sample rate.** It previously flattened
+  every clip to 24 kHz mono, which cost an imported bed everything above 12 kHz and
+  folded its stereo image flat. Each lane now renders to its own buffer before being
+  summed — which is also what makes ducking possible, and where track gain, mute and
+  solo apply.
+- **Per-lane mixer.** Lanes are persisted and gain a name, volume, mute, solo and an
+  optional duck-under-lane that pulls a bed down while another lane is speaking. Lanes
+  added in the editor also survive a reload now.
+- **Per-clip fades and speed.** Linear fade in/out, and a pitch-preserving speed control.
+  A re-timed clip changes its own length without shifting its neighbours, the same way
+  trimming already behaved.
+- **Export to MP3, OGG, Opus and FLAC** alongside WAV, written by the libsndfile already
+  bundled with the app. With ffmpeg on `PATH`, exports can additionally be loudness
+  normalised to EBU R128 — useful when clips from different voices land at different
+  levels. Every ffmpeg-backed path falls back cleanly when it is absent, and
+  `GET /health` now reports `ffmpeg_available`.
+
 ### Linux
 
 - **ROCm setup works on Linux AMD systems.** Docker ROCm builds now keep PyTorch
