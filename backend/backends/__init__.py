@@ -283,7 +283,15 @@ def _get_qwen_custom_voice_configs() -> list[ModelConfig]:
             hf_repo_id="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
             model_size="0.6B",
             size_mb=1200,
-            supports_instruct=True,
+            # qwen_tts throws instruct away for this checkpoint --
+            # `if self.model.tts_model_size in "0b6": instruct = None` in
+            # inference/qwen3_tts_model.py, generate_custom_voice(). Claiming
+            # support made the prosody compiler realise <emphasis> into a kwarg
+            # the library then discarded, so the tag did nothing and said
+            # nothing about it.
+            #
+            # Found by @hakimio on #1036.
+            supports_instruct=False,
             languages=["zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
         ),
     ]
