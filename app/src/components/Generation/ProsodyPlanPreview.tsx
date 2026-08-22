@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { apiClient } from '@/lib/api/client';
 import type { ProsodyPlanNode } from '@/lib/api/types';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 /** Debounce so a plan is not compiled on every keystroke. */
 const DEBOUNCE_MS = 400;
@@ -40,6 +41,10 @@ interface ProsodyPlanPreviewProps {
   /** Raised when compilation fails, so the caller can surface the parser's
    * message the same way it surfaces a failed generation. */
   onParseError?: (message: string | null) => void;
+  /** Opens the pronunciation dictionary. This panel is where a substitution
+   * becomes visible, so it is also where someone notices one is wrong — or
+   * missing — and it should not cost a trip to a settings screen to fix. */
+  onManageDictionary?: () => void;
 }
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -59,6 +64,7 @@ export function ProsodyPlanPreview({
   instruct,
   profileId,
   onParseError,
+  onManageDictionary,
 }: ProsodyPlanPreviewProps) {
   const { t } = useTranslation();
   const debouncedText = useDebounced(text, DEBOUNCE_MS);
@@ -134,8 +140,26 @@ export function ProsodyPlanPreview({
 
   if (nothingToShow) {
     return (
-      <div className="rounded-2xl border border-border/60 px-3 py-2.5 text-[11px] text-muted-foreground">
-        {t('generation.prosody.previewEmpty')}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/60 px-3 py-2.5">
+        <span className="text-[11px] text-muted-foreground">
+          {t('generation.prosody.previewEmpty')}
+        </span>
+        {/* Offered here precisely because there is nothing to show: a plain
+            script that came out mispronounced is the case where the author has
+            no directive to inspect and no reason to guess a dictionary
+            exists. */}
+        {onManageDictionary && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 shrink-0 gap-1 px-2 text-[11px]"
+            onClick={onManageDictionary}
+          >
+            <BookMarked className="h-3 w-3" />
+            {t('generation.prosody.previewTeach')}
+          </Button>
+        )}
       </div>
     );
   }
@@ -161,12 +185,23 @@ export function ProsodyPlanPreview({
       {data.dictionary_terms.length > 0 && (
         <div className="mt-2 flex items-start gap-2 rounded-lg bg-muted/50 px-2 py-1.5">
           <BookMarked className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="text-[11px] leading-snug text-foreground/90">
+          <span className="min-w-0 flex-1 text-[11px] leading-snug text-foreground/90">
             {t('generation.prosody.previewDictionary', {
               count: data.dictionary_terms.length,
               terms: data.dictionary_terms.join(', '),
             })}
           </span>
+          {onManageDictionary && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-my-0.5 h-6 shrink-0 px-2 text-[11px]"
+              onClick={onManageDictionary}
+            >
+              {t('generation.prosody.previewManageDictionary')}
+            </Button>
+          )}
         </div>
       )}
 
@@ -188,29 +223,31 @@ export function ProsodyPlanPreview({
         </ul>
       )}
 
-      {data.is_trivial ? (
+      {/* The rows are drawn even for a trivial plan. Reaching this point means
+          the dictionary matched something — a plan that is trivial *and* has no
+          dictionary terms returned above — and a substitution is precisely what
+          the author cannot deduce from their own script. Hiding the rows here
+          would suppress the one row worth reading. */}
+      <ol className="mt-2 max-h-[240px] space-y-1 overflow-y-auto pr-1">
+        {data.nodes.map((node, index) => (
+          <PlanRow
+            // Plan nodes have no id and identical runs are legitimate, so the
+            // index is the only stable key here.
+            key={`${node.kind}-${index}`}
+            node={node}
+            // Number the speech runs 1..N so the last one matches the run
+            // count in the header. Numbering by node index skips every
+            // silence and reads as though rows were missing.
+            runNumber={runNumberAt(data.nodes, index)}
+            defaultLanguage={language}
+          />
+        ))}
+      </ol>
+
+      {data.is_trivial && (
         <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
           {t('generation.prosody.previewTrivial')}
         </p>
-      ) : (
-        // A long script compiles to dozens of rows. Cap the list and scroll it
-        // here rather than letting the panel grow the floating box past the
-        // viewport, which pushes it over the window chrome.
-        <ol className="mt-2 max-h-[240px] space-y-1 overflow-y-auto pr-1">
-          {data.nodes.map((node, index) => (
-            <PlanRow
-              // Plan nodes have no id and identical runs are legitimate, so the
-              // index is the only stable key here.
-              key={`${node.kind}-${index}`}
-              node={node}
-              // Number the speech runs 1..N so the last one matches the run
-              // count in the header. Numbering by node index skips every
-              // silence and reads as though rows were missing.
-              runNumber={runNumberAt(data.nodes, index)}
-              defaultLanguage={language}
-            />
-          ))}
-        </ol>
       )}
     </div>
   );
