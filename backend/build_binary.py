@@ -137,13 +137,17 @@ def build_server(cuda=False, rocm=False):
             "--hidden-import",
             "backend.services.versions",
             # The prosody transformer and the pronunciation dictionary it
-            # resolves. Listed explicitly like every other backend.services
-            # module here: PyInstaller's static analysis is not relied on for
-            # this package, and the routes import these lazily, so a module
-            # missing from the frozen build surfaces as a 500 on first use
-            # rather than as a build failure.
+            # resolves. Belt and braces rather than a fix: `routes.prosody` and
+            # `routes.pronunciation` import these at module level, so
+            # PyInstaller's analysis already finds all eleven -- verified
+            # against a sidecar built before this list existed. Named
+            # explicitly anyway, like every other backend.services module here,
+            # because the only thing holding them in is a route import chain,
+            # and a module dropped from a frozen build fails at first use
+            # rather than at build time.
             #
-            # Spotted by @hakimio on #1036, who hit it building the sidecar.
+            # @hakimio hit this for real on #1036, where the equivalent modules
+            # hang off a function-local import and nothing static reaches them.
             "--hidden-import",
             "backend.services.prosody",
             "--hidden-import",
