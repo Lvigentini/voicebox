@@ -142,6 +142,7 @@ async def generate_with_prosody(
     engine_languages: list[str] | None = None,
     seed: int | None = None,
     enabled: bool = True,
+    on_plan=None,
 ) -> tuple[np.ndarray, int]:
     """Generate *text*, taking the transformer only when it has work to do.
 
@@ -157,6 +158,12 @@ async def generate_with_prosody(
             through unchanged.
         enabled: False renders the text literally, for a script that genuinely
             contains something shaped like a tag.
+        on_plan: Called with the compiled plan before anything is rendered,
+            including when the plan turns out trivial. A caller with somewhere
+            to put them -- a `generations` row, a status stream -- uses this to
+            surface warnings; one without it passes nothing and they stay in
+            the log. A warning is worth reporting whether or not the plan
+            ended up being segmented.
     """
     if not enabled:
         return await generate_chunked_fn(tts_model, text, voice_prompt, **gen_kwargs)
@@ -171,6 +178,9 @@ async def generate_with_prosody(
         engine_languages=engine_languages,
         instruct=gen_kwargs.get("instruct"),
     )
+
+    if on_plan is not None:
+        await on_plan(plan)
 
     if plan.is_trivial:
         # Nothing to do. Same call the caller would have made, with the one

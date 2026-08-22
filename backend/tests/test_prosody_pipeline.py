@@ -276,3 +276,61 @@ def test_generate_accepts_the_prosody_flag(client):
         client.post(f"/generate/{r.json()['id']}/cancel")
     finally:
         client.delete(f"/profiles/{profile['id']}")
+
+
+# ── Warnings reach a caller that has somewhere to put them ───────────
+
+
+@pytest.mark.asyncio
+async def test_the_plan_hook_fires_before_anything_is_rendered(spy, db):
+    """`on_plan` is the seam that lets a caller surface warnings.
+
+    Persisting them on the `generations` row is what puts a dropped directive
+    in front of the author while they are still waiting, instead of leaving it
+    in a server log nobody reads.
+    """
+    seen = []
+
+    await generate_with_prosody(
+        'Say <lang xml:lang="xx">this</lang> now.',
+        generate_chunked_fn=spy,
+        gen_kwargs={},
+        db=db,
+        engine_languages=["en", "es"],
+        on_plan=lambda plan: _record(seen, plan),
+        **BASE,
+    )
+
+    assert seen, "on_plan was never called"
+    assert "language_unsupported" in [w.code for w in seen[0].warnings]
+
+
+@pytest.mark.asyncio
+async def test_the_plan_hook_fires_even_when_the_plan_is_trivial(spy, db):
+    """A warning is worth reporting whether or not the plan got segmented.
+
+    An <emphasis> dropped on an engine that discards instruct leaves one plain
+    run -- the trivial path -- and that is precisely the case where the author
+    is owed an explanation, because nothing about the audio will hint at it.
+    """
+    seen = []
+
+    await generate_with_prosody(
+        "<emphasis level=\"strong\">Listen</emphasis>",
+        generate_chunked_fn=spy,
+        gen_kwargs={},
+        db=db,
+        supports_instruct=False,
+        on_plan=lambda plan: _record(seen, plan),
+        **BASE,
+    )
+
+    assert seen, "on_plan was never called for a trivial plan"
+    assert seen[0].is_trivial
+    assert "emphasis_unsupported" in [w.code for w in seen[0].warnings]
+    # And the engine still got the words, without the tag.
+    assert spy.calls[0]["text"] == "Listen"
+
+
+async def _record(sink, plan):
+    sink.append(plan)
