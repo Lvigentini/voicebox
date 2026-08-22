@@ -812,7 +812,7 @@
       "annotateTitle": "Draft the markup for me",
       "annotateHint": "The local model suggests pauses and phrasing. You review it before it is applied.",
       "annotateAction": "Draft",
-      "annotateUnavailable": "Needs the local language model, which is not available on this install.",
+      "annotateUnavailable": "Needs a local Qwen3 model. None is downloaded, so this stays off — the directives below still work.",
       "annotateTooLong": "Script is longer than {{max}} characters — shorten it, or add directives by hand.",
       "annotateFailed": "Could not draft markup.",
       "annotateRejected": "The suggestion changed the words of your script, so it was rejected.",
@@ -862,7 +862,8 @@
           "label": "Phonemes",
           "description": "Exact pronunciation, on engines that accept phonemes."
         }
-      }
+      },
+      "annotateReady": "Uses the Qwen3 {{size}} model you already have. You review the suggestion before it is applied."
     }
   },
   "main": {

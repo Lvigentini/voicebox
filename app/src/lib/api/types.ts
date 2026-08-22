@@ -181,7 +181,8 @@ export interface ProsodyAnnotateResponse {
 
 export interface ProsodyAnnotationAvailability {
   available: boolean;
-  model_size: string;
+  /** The size that would actually run — null when nothing is cached. */
+  model_size: string | null;
 }
 
 export interface GenerationVersionResponse {
