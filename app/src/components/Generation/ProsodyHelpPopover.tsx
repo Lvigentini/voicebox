@@ -38,7 +38,10 @@ const PROSODY_TAGS = [
   { key: 'prosody', snippet: '<prosody rate="0.9"></prosody>', caretOffset: 10 },
   { key: 'emphasis', snippet: '<emphasis level="strong"></emphasis>', caretOffset: 11 },
   { key: 'sub', snippet: '<sub alias="ban-DEH-ha"></sub>', caretOffset: 6 },
-  { key: 'phoneme', snippet: '<phoneme alphabet="ipa" ph="ban&#712;dexa"></phoneme>', caretOffset: 10 },
+  // The stress mark here is the literal IPA character, not a numeric entity.
+  // The parser unescapes the five named XML entities and nothing else, so
+  // "&#712;" would reach the engine verbatim and be spoken as itself.
+  { key: 'phoneme', snippet: '<phoneme alphabet="ipa" ph="banˈdexa"></phoneme>', caretOffset: 10 },
 ] as const;
 
 interface ProsodyHelpPopoverProps {
