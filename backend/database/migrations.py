@@ -265,6 +265,8 @@ def _migrate_generations(engine, inspector, tables: set[str]) -> None:
             "source VARCHAR NOT NULL DEFAULT 'manual'",
             "source",
         )
+    if "prosody_warnings" not in columns:
+        _add_column(engine, "generations", "prosody_warnings TEXT", "prosody_warnings")
 
 
 def _migrate_effect_presets(engine, inspector, tables: set[str]) -> None:

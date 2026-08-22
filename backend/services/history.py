@@ -121,6 +121,7 @@ async def update_generation_status(
     audio_path: Optional[str] = None,
     duration: Optional[float] = None,
     error: Optional[str] = None,
+    prosody_warnings: Optional[str] = None,
 ) -> Optional[GenerationResponse]:
     """Update the status of a generation (used by async generation flow)."""
     generation = db.query(DBGeneration).filter_by(id=generation_id).first()
@@ -134,6 +135,8 @@ async def update_generation_status(
         generation.duration = duration
     if error is not None:
         generation.error = error
+    if prosody_warnings is not None:
+        generation.prosody_warnings = prosody_warnings
 
     db.commit()
     db.refresh(generation)

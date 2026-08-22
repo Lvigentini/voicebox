@@ -94,6 +94,11 @@ class Generation(Base):
     # profile's personality LLM before TTS. Future sources (bulk import,
     # agent replies, etc.) can extend this.
     source = Column(String, nullable=False, default="manual")
+    # JSON list of {code, detail}: directives the target engine could not
+    # honour. Persisted rather than only logged, because the status stream
+    # reads this row and a directive that silently did nothing is exactly what
+    # the author needs told -- otherwise it reads as the model ignoring them.
+    prosody_warnings = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

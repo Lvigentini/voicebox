@@ -26,6 +26,25 @@ IMPORT_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".we
 IMPORT_AUDIO_MAX_BYTES = 200 * 1024 * 1024  # 200 MB
 
 
+def _decode_prosody_warnings(raw):
+    """Decode the stored JSON warning list, tolerating anything unexpected.
+
+    A malformed value here must never break the status stream the whole UI
+    depends on, so a decode failure degrades to "no warnings" rather than
+    taking the generation's progress down with it.
+    """
+    if not raw:
+        return []
+    import json as _json
+
+    try:
+        decoded = _json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring unparseable prosody_warnings on a generation row")
+        return []
+    return decoded if isinstance(decoded, list) else []
+
+
 def _get_or_create_import_profile(db: Session) -> DBVoiceProfile:
     """Singleton profile every imported audio clip points at — keeps the
     Generation FK happy without making profile_id nullable across the schema."""
@@ -295,6 +314,10 @@ async def get_generation_status(generation_id: str, db: Session = Depends(get_db
                     # Agent-originated sources ("mcp", "rest") skip main-window
                     # autoplay — the floating pill plays those directly.
                     "source": gen.source,
+                    # Directives the engine could not honour. Repeated on every
+                    # tick so a client that connects late still receives them;
+                    # the client shows them once per generation.
+                    "prosody_warnings": _decode_prosody_warnings(gen.prosody_warnings),
                 }
                 yield f"data: {json.dumps(payload)}\n\n"
 
