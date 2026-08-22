@@ -781,7 +781,55 @@
           "description": "Exact pronunciation, on engines that accept phonemes."
         }
       },
-      "annotateReady": "Uses the Qwen3 {{size}} model you already have. You review the suggestion before it is applied."
+      "annotateReady": "Uses the Qwen3 {{size}} model you already have. You review the suggestion before it is applied.",
+      "previewTeach": "Teach a pronunciation",
+      "previewManageDictionary": "Manage"
+    },
+    "pronunciation": {
+      "title": "Pronunciation dictionary",
+      "tooltip": "Teach a pronunciation",
+      "scopeNote": "Showing entries that apply to {{voice}} in {{language}}.",
+      "anyVoice": "any voice",
+      "loading": "Loading entries…",
+      "empty": "No entries apply here yet. Add a term the model keeps getting wrong — a name, a place, an acronym — and it will be fixed in every generation from now on, without any markup in your script.",
+      "addAction": "Add a pronunciation",
+      "saveFailed": "Could not save that entry.",
+      "confirmDelete": "Delete?",
+      "disable": "Disable",
+      "enable": "Enable",
+      "badgeThisVoice": "This voice",
+      "badgeAllVoices": "All voices",
+      "badgeAllLanguages": "All languages",
+      "badgeDisabled": "Off",
+      "realisedAsLanguage": "→ read as {{language}}",
+      "fieldTerm": "Term",
+      "fieldTermPlaceholder": "The word as it appears in your script",
+      "fieldStrategy": "How to fix it",
+      "fieldReplacement": "Spoken as",
+      "fieldReplacementPlaceholder": "ban-DEH-ha",
+      "fieldSpokenLanguage": "Read it in",
+      "fieldPhonemes": "IPA",
+      "fieldFallback": "Fallback spelling",
+      "fieldFallbackPlaceholder": "The term itself",
+      "fieldFallbackHint": "Used on engines that do not accept phonemes. Left blank, the term is spoken as written.",
+      "fieldScope": "Where it applies",
+      "scopeVoice": "Only the selected voice",
+      "scopeVoiceNamed": "Only {{name}}",
+      "scopeLanguage": "Only when generating in {{language}}",
+      "strategy": {
+        "respell": {
+          "label": "Respell",
+          "description": "Substitute a spelling the model reads correctly. Works on every engine, and does not cut the sentence — reach for this one first."
+        },
+        "language": {
+          "label": "Language",
+          "description": "Read the term in another language. The words are unchanged; only the accent and letter-to-sound rules are. Good for foreign names left as written."
+        },
+        "phoneme": {
+          "label": "Phonemes",
+          "description": "Give the exact IPA transcription. The most precise option, and the only one that needs engine support — the fallback spelling is used elsewhere."
+        }
+      }
     }
   },
   "main": {

@@ -1,7 +1,15 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMatchRoute } from '@tanstack/react-router';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Dices, ListTree, Loader2, SlidersHorizontal, Sparkles, Wand2 } from 'lucide-react';
+import {
+  BookMarked,
+  Dices,
+  ListTree,
+  Loader2,
+  SlidersHorizontal,
+  Sparkles,
+  Wand2,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -28,6 +36,7 @@ import { EngineModelSelector } from './EngineModelSelector';
 import { ParalinguisticInput } from './ParalinguisticInput';
 import { ProsodyHelpPopover } from './ProsodyHelpPopover';
 import { ProsodyPlanPreview } from './ProsodyPlanPreview';
+import { PronunciationDictionaryDialog } from './PronunciationDictionaryDialog';
 
 interface FloatingGenerateBoxProps {
   isPlayerOpen?: boolean;
@@ -51,6 +60,11 @@ export function FloatingGenerateBox({
   // Set by the preview panel. Only read on submit — toasting while the user is
   // still mid-tag would fire on almost every keystroke.
   const [prosodyParseError, setProsodyParseError] = useState<string | null>(null);
+  const [isDictionaryOpen, setIsDictionaryOpen] = useState(false);
+  // Captured when the dialog opens rather than read from the textarea inside
+  // it: opening the dialog moves focus, and a textarea that has lost focus
+  // reports an empty selection in some browsers.
+  const [dictionaryTerm, setDictionaryTerm] = useState<string | undefined>(undefined);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -239,6 +253,26 @@ export function FloatingGenerateBox({
   const replaceTextWithMarkup = (markup: string) => {
     form.setValue('text', markup, { shouldDirty: true, shouldValidate: true });
     setIsProsodyPreviewOpen(true);
+  };
+
+  /** Open the dictionary, pre-filled with whatever is selected in the script.
+   *
+   * The word the author wants to teach is almost always one they can see, and
+   * usually one they have just highlighted after hearing it go wrong. Taking
+   * the selection here saves retyping it, and quietly does the right thing
+   * when there is no selection: an empty term and a blank form. */
+  const openDictionary = () => {
+    const textarea = textareaRef.current;
+    const selection = textarea
+      ? (textarea.value.slice(textarea.selectionStart, textarea.selectionEnd) ?? '')
+      : '';
+    const trimmed = selection.trim();
+    // A whole sentence is a selection, not a term. The dictionary matches on
+    // word boundaries, so pre-filling one would produce an entry that never
+    // fires — better to hand back an empty field than a plausible-looking
+    // rule that silently does nothing.
+    setDictionaryTerm(trimmed && trimmed.length <= 60 ? trimmed : undefined);
+    setIsDictionaryOpen(true);
   };
 
   // Auto-resize textarea based on content (only when expanded)
@@ -582,6 +616,30 @@ export function FloatingGenerateBox({
                           {t('generation.prosody.previewTitle')}
                         </span>
                       </div>
+
+                      {/* The dictionary. Sits with the prosody controls because
+                          that is what it compiles into, and next to the text
+                          because it is opened with a word from it selected. */}
+                      <div className="group relative">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={openDictionary}
+                          className={cn(
+                            'h-10 w-10 rounded-full transition-all duration-200',
+                            isDictionaryOpen
+                              ? 'bg-accent text-accent-foreground border border-accent hover:bg-accent/90'
+                              : 'bg-card border border-border hover:bg-background/50',
+                          )}
+                          aria-label={t('generation.pronunciation.title')}
+                        >
+                          <BookMarked className="h-4 w-4" />
+                        </Button>
+                        <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-md bg-popover px-3 py-1.5 text-xs text-popover-foreground border border-border opacity-0 transition-opacity group-hover:opacity-100 z-[9999]">
+                          {t('generation.pronunciation.tooltip')}
+                        </span>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -673,11 +731,21 @@ export function FloatingGenerateBox({
                       instruct={form.watch('instruct')}
                       profileId={selectedProfileId}
                       onParseError={setProsodyParseError}
+                      onManageDictionary={openDictionary}
                     />
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
+
+            <PronunciationDictionaryDialog
+              open={isDictionaryOpen}
+              onOpenChange={setIsDictionaryOpen}
+              language={form.watch('language')}
+              profileId={selectedProfileId}
+              profileName={selectedProfile?.name}
+              initialTerm={dictionaryTerm}
+            />
 
             <AnimatePresence>
               <motion.div

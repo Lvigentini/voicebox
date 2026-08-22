@@ -25,6 +25,10 @@ import type {
   ProsodyAnnotationAvailability,
   ProsodyPreviewRequest,
   ProsodyPreviewResponse,
+  PronunciationEntry,
+  PronunciationEntryCreate,
+  PronunciationEntryUpdate,
+  PronunciationListParams,
   RocmStatus,
   StoryCreate,
   StoryDetailResponse,
@@ -290,6 +294,49 @@ class ApiClient {
     return this.request<ProsodyAnnotateResponse>('/prosody/annotate', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  // Pronunciation dictionary
+  /** Entries the dictionary holds. With `language` or `profile_id` this returns
+   * what would actually apply to a generation with those settings, which is a
+   * different question from what exists — a global entry applies everywhere,
+   * and a voice-scoped one only to its voice. */
+  async listPronunciations(
+    params: PronunciationListParams = {},
+  ): Promise<PronunciationEntry[]> {
+    const query = new URLSearchParams();
+    if (params.language) query.set('language', params.language);
+    if (params.profile_id) query.set('profile_id', params.profile_id);
+    if (params.include_disabled !== undefined) {
+      query.set('include_disabled', String(params.include_disabled));
+    }
+    const suffix = query.toString() ? `?${query}` : '';
+    return this.request<PronunciationEntry[]>(`/pronunciations${suffix}`);
+  }
+
+  /** Add a term. 409 when the same term already exists in the same scope —
+   * the message names the existing entry, so surface it rather than retrying. */
+  async createPronunciation(data: PronunciationEntryCreate): Promise<PronunciationEntry> {
+    return this.request<PronunciationEntry>('/pronunciations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePronunciation(
+    entryId: string,
+    data: PronunciationEntryUpdate,
+  ): Promise<PronunciationEntry> {
+    return this.request<PronunciationEntry>(`/pronunciations/${entryId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePronunciation(entryId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/pronunciations/${entryId}`, {
+      method: 'DELETE',
     });
   }
 

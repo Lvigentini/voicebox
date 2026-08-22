@@ -155,6 +155,59 @@ export interface ProsodyAnnotationAvailability {
   model_size: string | null;
 }
 
+// ── Pronunciation dictionary ─────────────────────────────────────────
+//
+// Entries are resolved into prosody markup at generation time, which is why
+// these live next to the prosody types: `<sub>` for a respelling, `<lang>` for
+// a term read in another language, `<phoneme>` for an explicit transcription.
+
+/** How a term is realised. `respell` works on every engine and is the fallback
+ * whenever the other two are unavailable, which is why `replacement` is
+ * required regardless of the strategy chosen. */
+export type PronunciationStrategy = 'respell' | 'language' | 'phoneme';
+
+export interface PronunciationEntry {
+  id: string;
+  term: string;
+  replacement: string;
+  strategy: PronunciationStrategy;
+  /** `language` strategy: the language the term is read in. */
+  spoken_language?: string | null;
+  /** `phoneme` strategy: the IPA transcription. */
+  phonemes?: string | null;
+  /** Applies only when generating in this language. Null means every language. */
+  language?: string | null;
+  /** Scoped to one voice. Null means every voice. */
+  profile_id?: string | null;
+  enabled: boolean;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PronunciationEntryCreate {
+  term: string;
+  replacement: string;
+  strategy?: PronunciationStrategy;
+  spoken_language?: string | null;
+  phonemes?: string | null;
+  language?: string | null;
+  profile_id?: string | null;
+  enabled?: boolean;
+  notes?: string | null;
+}
+
+/** Every field optional: the endpoint leaves omitted ones alone. Sending an
+ * explicit `null` is how a scope is widened back to "everything". */
+export type PronunciationEntryUpdate = Partial<PronunciationEntryCreate>;
+
+export interface PronunciationListParams {
+  /** Narrow to entries that would apply to a generation in this language. */
+  language?: string | null;
+  profile_id?: string | null;
+  include_disabled?: boolean;
+}
+
 export interface GenerationVersionResponse {
   id: string;
   generation_id: string;
