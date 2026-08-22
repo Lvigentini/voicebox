@@ -24,6 +24,11 @@ import type {
   PresetVoice,
   PersonalityTextResponse,
   ProfileSampleResponse,
+  ProsodyAnnotateRequest,
+  ProsodyAnnotateResponse,
+  ProsodyAnnotationAvailability,
+  ProsodyPreviewRequest,
+  ProsodyPreviewResponse,
   RocmStatus,
   StoryCreate,
   StoryDetailResponse,
@@ -343,6 +348,36 @@ class ApiClient {
   // Generation
   async generateSpeech(data: GenerationRequest): Promise<GenerationResponse> {
     return this.request<GenerationResponse>('/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Prosody
+  /** Compile a script into a render plan. Resolves the dictionary and loads no
+   * model, so it is cheap enough to call while the user types. */
+  async previewProsody(data: ProsodyPreviewRequest): Promise<ProsodyPreviewResponse> {
+    return this.request<ProsodyPreviewResponse>('/prosody/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Whether the local LLM can draft markup right now. Lets the UI disable the
+   * action rather than offering something that will fail with a 409. */
+  async getProsodyAnnotationAvailability(
+    modelSize?: string,
+  ): Promise<ProsodyAnnotationAvailability> {
+    const query = modelSize ? `?model_size=${encodeURIComponent(modelSize)}` : '';
+    return this.request<ProsodyAnnotationAvailability>(
+      `/prosody/annotate/availability${query}`,
+    );
+  }
+
+  /** Ask the local LLM to draft markup. Returns a suggestion for a human to
+   * review — nothing is stored and nothing is generated. */
+  async annotateProsody(data: ProsodyAnnotateRequest): Promise<ProsodyAnnotateResponse> {
+    return this.request<ProsodyAnnotateResponse>('/prosody/annotate', {
       method: 'POST',
       body: JSON.stringify(data),
     });

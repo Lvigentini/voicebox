@@ -725,8 +725,8 @@
   },
   "history": {
     "empty": "No voice generations, yet…",
-      "searchPlaceholder": "Search clips…",
-      "emptySearch": "No clips match that search.",
+    "searchPlaceholder": "Search clips…",
+    "emptySearch": "No clips match that search.",
     "dragHandle": "Drag into a folder",
     "actions": {
       "menu": "Actions",
@@ -800,6 +800,69 @@
       "tooltipInactive": "Speak in character",
       "ariaLabelActive": "Speaking in character",
       "ariaLabelInactive": "Speak in character"
+    },
+    "prosody": {
+      "show": "Show prosody directives",
+      "hide": "Hide prosody directives",
+      "toggle": "Prosody directives",
+      "helpTitle": "Prosody directives",
+      "helpIntro": "Type these into the script to control pauses, language, rate and emphasis.",
+      "helpInsert": "Insert",
+      "helpDocsHint": "Anything else in angle brackets stays literal text and is spoken as written.",
+      "annotateTitle": "Draft the markup for me",
+      "annotateHint": "The local model suggests pauses and phrasing. You review it before it is applied.",
+      "annotateAction": "Draft",
+      "annotateUnavailable": "Needs the local language model, which is not available on this install.",
+      "annotateTooLong": "Script is longer than {{max}} characters — shorten it, or add directives by hand.",
+      "annotateFailed": "Could not draft markup.",
+      "annotateRejected": "The suggestion changed the words of your script, so it was rejected.",
+      "annotateNoChange": "The model had nothing to add — the script reads fine as it is.",
+      "annotateAccept": "Use this",
+      "annotateDiscard": "Discard",
+      "previewShow": "Show the render plan",
+      "previewHide": "Hide the render plan",
+      "previewTitle": "Render plan",
+      "previewLoading": "Compiling…",
+      "previewEmpty": "Nothing directed — this script generates in one pass, as usual.",
+      "previewTrivial": "One pass. The directives changed the words, not how the script is cut.",
+      "previewError": "That markup did not parse",
+      "previewRuns_one": "{{count}} run",
+      "previewRuns_other": "{{count}} runs",
+      "previewSilenceTotal": "{{ms}}ms of silence",
+      "previewPause": "pause {{ms}}ms",
+      "previewRate": "rate {{rate}}",
+      "previewSpokenAs": "spoken as",
+      "previewDictionary_one": "Dictionary applied to {{terms}}",
+      "previewDictionary_other": "Dictionary applied to {{terms}}",
+      "errorTitle": "Check the markup",
+      "warningTitle_one": "A directive was not applied",
+      "warningTitle_other": "{{count}} directives were not applied",
+      "tags": {
+        "break": {
+          "label": "Pause",
+          "description": "Inserts real silence. Costs no generation call."
+        },
+        "lang": {
+          "label": "Language span",
+          "description": "Reads the enclosed words in another language."
+        },
+        "prosody": {
+          "label": "Rate",
+          "description": "Speeds up or slows down the enclosed words. 0.5 to 2.0."
+        },
+        "emphasis": {
+          "label": "Emphasis",
+          "description": "Asks the engine to stress the words. Only engines that honour delivery instructions can."
+        },
+        "sub": {
+          "label": "Respelling",
+          "description": "Speaks something else in place of the words. The safest way to fix a name."
+        },
+        "phoneme": {
+          "label": "Phonemes",
+          "description": "Exact pronunciation, on engines that accept phonemes."
+        }
+      }
     }
   },
   "main": {
@@ -1206,7 +1269,8 @@
         "title": "Switch to CPU backend",
         "description": "Disable GPU acceleration. You can re-download the GPU backend later.",
         "button": "Switch"
-      },      "remove": {
+      },
+      "remove": {
         "title": "Remove CUDA backend",
         "description": "Delete the downloaded CUDA binary to free disk space.",
         "button": "Remove"

@@ -118,6 +118,72 @@ export interface GenerationRequest {
   effects_chain?: EffectConfig[];
 }
 
+/** A directive the target engine cannot honour. */
+export interface ProsodyPlanWarning {
+  code: string;
+  detail: string;
+}
+
+/** One step of a compiled plan, in reading order: a generation call, or a silence. */
+export interface ProsodyPlanNode {
+  kind: 'speech' | 'silence';
+  /** Speech only: what the engine is handed. */
+  text?: string | null;
+  /** Speech only, and only when a substitution changed it: what the author wrote. */
+  source_text?: string | null;
+  language?: string | null;
+  rate?: number | null;
+  instruct?: string | null;
+  /** Silence only. */
+  ms?: number | null;
+}
+
+export interface ProsodyPreviewRequest {
+  text: string;
+  engine?: string;
+  language?: string;
+  /** Scopes which dictionary entries apply, so the preview matches the voice. */
+  profile_id?: string | null;
+  instruct?: string | null;
+  /** Capabilities differ within an engine, so the variant has to be named. */
+  model_size?: string | null;
+}
+
+export interface ProsodyPreviewResponse {
+  original: string;
+  /** The script with dictionary entries resolved into markup an author could have typed. */
+  markup: string;
+  /** Terms the dictionary matched, in the order it applied them. */
+  dictionary_terms: string[];
+  nodes: ProsodyPlanNode[];
+  warnings: ProsodyPlanWarning[];
+  run_count: number;
+  /** True when the script takes the ordinary single-shot path. */
+  is_trivial: boolean;
+}
+
+export interface ProsodyAnnotateRequest {
+  text: string;
+  language?: string;
+  model_size?: string | null;
+}
+
+export interface ProsodyAnnotateResponse {
+  original: string;
+  /** Safe to use unconditionally: on rejection this is the original text. */
+  markup: string;
+  accepted: boolean;
+  changed: boolean;
+  rejected_reason?: string | null;
+  model_size?: string | null;
+  attempts: number;
+}
+
+export interface ProsodyAnnotationAvailability {
+  available: boolean;
+  model_size: string;
+}
+
 export interface GenerationVersionResponse {
   id: string;
   generation_id: string;

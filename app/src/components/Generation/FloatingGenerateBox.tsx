@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMatchRoute } from '@tanstack/react-router';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Dices, Loader2, SlidersHorizontal, Sparkles, Wand2 } from 'lucide-react';
+import { Dices, ListTree, Loader2, SlidersHorizontal, Sparkles, Wand2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,8 @@ import { useStoryStore } from '@/stores/storyStore';
 import { useUIStore } from '@/stores/uiStore';
 import { EngineModelSelector } from './EngineModelSelector';
 import { ParalinguisticInput } from './ParalinguisticInput';
+import { ProsodyHelpPopover } from './ProsodyHelpPopover';
+import { ProsodyPlanPreview } from './ProsodyPlanPreview';
 
 interface FloatingGenerateBoxProps {
   isPlayerOpen?: boolean;
@@ -44,6 +46,11 @@ export function FloatingGenerateBox({
   const { data: profiles } = useProfiles();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isInstructExpanded, setIsInstructExpanded] = useState(false);
+  const [isProsodyHelpOpen, setIsProsodyHelpOpen] = useState(false);
+  const [isProsodyPreviewOpen, setIsProsodyPreviewOpen] = useState(false);
+  // Set by the preview panel. Only read on submit — toasting while the user is
+  // still mid-tag would fire on almost every keystroke.
+  const [prosodyParseError, setProsodyParseError] = useState<string | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -197,6 +204,43 @@ export function FloatingGenerateBox({
     }
   }, [selectedProfile, effectPresets, form]);
 
+  /** Drop a prosody snippet at the caret.
+   *
+   * Goes through react-hook-form's setValue rather than the DOM so the form
+   * state stays authoritative, then restores focus and places the caret where
+   * the user is about to type — inside a span tag, or after a void one. */
+  const insertProsodySnippet = (snippet: string, caretOffset: number) => {
+    const textarea = textareaRef.current;
+    const current = form.getValues('text') ?? '';
+    const start = textarea?.selectionStart ?? current.length;
+    const end = textarea?.selectionEnd ?? current.length;
+
+    const next = current.slice(0, start) + snippet + current.slice(end);
+    form.setValue('text', next, { shouldDirty: true, shouldValidate: true });
+
+    const caret = start + snippet.length - caretOffset;
+    setIsProsodyHelpOpen(false);
+    // Wait for the controlled re-render before moving the caret, or the
+    // browser puts it back at the end of the new value.
+    requestAnimationFrame(() => {
+      const node = textareaRef.current;
+      if (!node) return;
+      node.focus();
+      node.setSelectionRange(caret, caret);
+    });
+  };
+
+  /** Accept a drafted script from the annotator.
+   *
+   * Replaces the whole text rather than splicing, because the model returns
+   * the script with directives woven through it. The plan preview opens with
+   * it: the author has just accepted markup they did not write, and the plan
+   * is how they check what it does before spending a generation on it. */
+  const replaceTextWithMarkup = (markup: string) => {
+    form.setValue('text', markup, { shouldDirty: true, shouldValidate: true });
+    setIsProsodyPreviewOpen(true);
+  };
+
   // Auto-resize textarea based on content (only when expanded)
   useEffect(() => {
     if (!isExpanded) {
@@ -248,6 +292,18 @@ export function FloatingGenerateBox({
   }, [isExpanded]);
 
   async function onSubmit(data: Parameters<typeof handleSubmit>[0]) {
+    // Malformed markup would fail server-side anyway, but only after the
+    // generation is queued. Catch it here so the message names the tag while
+    // the text is still in front of the user.
+    if (prosodyParseError) {
+      setIsProsodyPreviewOpen(true);
+      toast({
+        title: t('generation.prosody.errorTitle'),
+        description: prosodyParseError,
+        variant: 'destructive',
+      });
+      return;
+    }
     await handleSubmit(data, selectedProfileId);
   }
 
@@ -474,6 +530,62 @@ export function FloatingGenerateBox({
                   )}
                 </AnimatePresence>
 
+                {/* Prosody help and plan preview. Not engine-gated: pauses,
+                    language spans and rate are realised by cutting and
+                    reassembling, so they work on every engine. */}
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex items-center gap-2"
+                    >
+                      <div className="group relative">
+                        <ProsodyHelpPopover
+                          open={isProsodyHelpOpen}
+                          onOpenChange={setIsProsodyHelpOpen}
+                          onInsert={insertProsodySnippet}
+                          onReplaceText={replaceTextWithMarkup}
+                          text={form.watch('text') ?? ''}
+                          language={form.watch('language')}
+                          disabled={!selectedProfileId}
+                        />
+                        <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-md bg-popover px-3 py-1.5 text-xs text-popover-foreground border border-border opacity-0 transition-opacity group-hover:opacity-100 z-[9999]">
+                          {t('generation.prosody.toggle')}
+                        </span>
+                      </div>
+
+                      <div className="group relative">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setIsProsodyPreviewOpen((prev) => !prev)}
+                          className={cn(
+                            'h-10 w-10 rounded-full transition-all duration-200',
+                            isProsodyPreviewOpen
+                              ? 'bg-accent text-accent-foreground border border-accent hover:bg-accent/90'
+                              : 'bg-card border border-border hover:bg-background/50',
+                          )}
+                          aria-label={
+                            isProsodyPreviewOpen
+                              ? t('generation.prosody.previewHide')
+                              : t('generation.prosody.previewShow')
+                          }
+                          aria-pressed={isProsodyPreviewOpen}
+                        >
+                          <ListTree className="h-4 w-4" />
+                        </Button>
+                        <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-md bg-popover px-3 py-1.5 text-xs text-popover-foreground border border-border opacity-0 transition-opacity group-hover:opacity-100 z-[9999]">
+                          {t('generation.prosody.previewTitle')}
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <div className="group relative">
                   <Button
                     type="submit"
@@ -533,6 +645,36 @@ export function FloatingGenerateBox({
                       </FormItem>
                     )}
                   />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Plan preview — what the directives and the dictionary will
+                actually do. Compiled server-side with no model loaded, so it
+                is safe to leave open while typing. */}
+            <AnimatePresence>
+              {isProsodyPreviewOpen && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2">
+                    <ProsodyPlanPreview
+                      text={form.watch('text') ?? ''}
+                      // `engine` is optional in the schema; the form defaults
+                      // it to 'qwen', so mirror that rather than sending
+                      // undefined.
+                      engine={form.watch('engine') ?? 'qwen'}
+                      language={form.watch('language')}
+                      modelSize={form.watch('modelSize')}
+                      instruct={form.watch('instruct')}
+                      profileId={selectedProfileId}
+                      onParseError={setProsodyParseError}
+                    />
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
