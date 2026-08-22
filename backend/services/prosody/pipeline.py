@@ -28,7 +28,9 @@ from .renderer import render
 logger = logging.getLogger(__name__)
 
 
-def engine_capabilities(engine: str) -> tuple[bool, list[str] | None]:
+def engine_capabilities(
+    engine: str, model_size: str | None = None
+) -> tuple[bool, list[str] | None]:
     """What *engine* can honour, read from the model registry.
 
     Derived here rather than assumed, so a plan's warnings describe the engine
@@ -37,9 +39,17 @@ def engine_capabilities(engine: str) -> tuple[bool, list[str] | None]:
     branch (#1023); once that lands this should call them instead of
     re-deriving the same answer.
 
-    An engine whose variants disagree reports no instruct support: a request
-    names an engine and the model size can change under it, so the
-    conservative answer is the only one true for every variant.
+    Capabilities differ *within* an engine -- Qwen CustomVoice honours instruct
+    at 1.7B and discards it at 0.6B -- so a lookup keyed on the engine alone
+    cannot answer correctly. Narrow to the variant that will actually run
+    whenever the caller knows it.
+
+    Without a *model_size* the answer stays conservative: a request that has
+    not pinned a size can land on any variant, and claiming a capability the
+    chosen one lacks is the failure this function exists to prevent. Erring the
+    other way only costs a warning that was not strictly necessary.
+
+    Narrowing by size was @hakimio's observation on #1036.
     """
     try:
         from ...backends import get_tts_model_configs
@@ -47,7 +57,13 @@ def engine_capabilities(engine: str) -> tuple[bool, list[str] | None]:
         configs = [c for c in get_tts_model_configs() if c.engine == engine]
         if not configs:
             return False, None
-        supports_instruct = all(c.supports_instruct for c in configs)
+
+        if model_size is not None:
+            configs = [c for c in configs if c.model_size == model_size] or configs
+            supports_instruct = configs[0].supports_instruct
+        else:
+            supports_instruct = all(c.supports_instruct for c in configs)
+
         languages: list[str] = []
         for cfg in configs:
             languages.extend(lang for lang in cfg.languages if lang not in languages)

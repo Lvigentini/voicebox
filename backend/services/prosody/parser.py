@@ -35,8 +35,18 @@ _VOID_TAGS = {"break"}
 _SPAN_TAGS = {"lang", "prosody", "emphasis", "sub", "phoneme"}
 _ALL_TAGS = _VOID_TAGS | _SPAN_TAGS
 
+# A tag name has to end where the name ends. Without this the alternation
+# matches a *prefix* of a longer word: "<subject>" matches `sub` and the rest
+# lands in `attrs`, so an ordinary word inside angle brackets either raises a
+# parse error or, worse, compiles to something. "<breaking> news" parsed as a
+# 700ms Break and the word was dropped from the script entirely -- silent
+# corruption, and the opposite of the forgiveness this parser exists to give.
+#
+# Reported by @hakimio on #1036.
+_TAG_NAME_END = r"(?![\w:.-])"
+
 _TAG_RE = re.compile(
-    r"<\s*(?P<closing>/)?\s*(?P<name>" + "|".join(sorted(_ALL_TAGS)) + r")"
+    r"<\s*(?P<closing>/)?\s*(?P<name>" + "|".join(sorted(_ALL_TAGS)) + r")" + _TAG_NAME_END +
     r"(?P<attrs>[^<>]*?)(?P<void>/)?\s*>",
     re.IGNORECASE,
 )
@@ -200,7 +210,9 @@ def parse(markup: str) -> list[Node]:
 
 
 _STRIP_RE = re.compile(
-    r"<\s*/?\s*(?:" + "|".join(sorted(_ALL_TAGS)) + r")(?:[^<>]*?)/?\s*>", re.IGNORECASE
+    r"<\s*/?\s*(?:" + "|".join(sorted(_ALL_TAGS)) + r")" + _TAG_NAME_END +
+    r"(?:[^<>]*?)/?\s*>",
+    re.IGNORECASE,
 )
 
 

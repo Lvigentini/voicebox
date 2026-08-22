@@ -45,7 +45,7 @@ async def preview_prosody(
     )
     annotated, applied_terms = annotate(data.text, rules_from_entries(entries))
 
-    supports_instruct, languages = engine_capabilities(data.engine)
+    supports_instruct, languages = engine_capabilities(data.engine, data.model_size)
     try:
         plan = compile_plan(
             annotated,

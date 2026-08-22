@@ -140,13 +140,18 @@ def compile_plan(
             # be lost either -- glue it onto the previous run.
             if plan_nodes and isinstance(plan_nodes[-1], Speech):
                 prev = plan_nodes[-1]
-                plan_nodes[-1] = Speech(
+                # `source_text` has to grow with `text`. Leaving it alone on a
+                # substituted run desynchronises the pair, so a preview shows
+                # the author's words minus whatever whitespace followed the
+                # closing tag -- the preview's whole job is to be faithful.
+                #
+                # Reported by @hakimio on #1036.
+                plan_nodes[-1] = replace(
+                    prev,
                     text=prev.text + raw_text,
-                    language=prev.language,
-                    rate=prev.rate,
-                    instruct=prev.instruct,
-                    seed=prev.seed,
-                    source_text=prev.source_text,
+                    source_text=(
+                        None if prev.source_text is None else prev.source_text + raw_text
+                    ),
                 )
             continue
 

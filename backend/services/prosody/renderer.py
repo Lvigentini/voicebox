@@ -25,6 +25,7 @@ Two things this must get right, both measured rather than assumed:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import librosa
@@ -266,6 +267,7 @@ async def render(
         if audio.ndim > 1:
             audio = audio.mean(axis=0)
 
+        needs_resample = False
         if sample_rate is None:
             sample_rate = int(run_sr)
             if pending_silence_ms:
@@ -276,16 +278,17 @@ async def render(
             logger.info(
                 "Resampling a prosody run from %dHz to %dHz", int(run_sr), sample_rate
             )
-            audio = librosa.resample(audio, orig_sr=int(run_sr), target_sr=sample_rate)
+            needs_resample = True
 
-        if trim_runs:
-            audio = trim_edges(
-                audio,
-                sample_rate,
-                lead=index != first_speech,
-                trail=index != last_speech,
-            )
-        audio = apply_rate(audio, node.rate, sample_rate)
+        audio = await asyncio.to_thread(
+            _post_process_run,
+            audio,
+            orig_sr=int(run_sr) if needs_resample else None,
+            sample_rate=sample_rate,
+            rate=node.rate,
+            trim_lead=trim_runs and index != first_speech,
+            trim_trail=trim_runs and index != last_speech,
+        )
 
         if audio.size:
             pieces.append((audio, False))
@@ -297,7 +300,36 @@ async def render(
     if pending_silence_ms:
         pieces.append((_silence(pending_silence_ms, sample_rate), True))
 
-    return assemble(pieces, sample_rate, crossfade_ms=crossfade_ms), sample_rate
+    return (
+        await asyncio.to_thread(assemble, pieces, sample_rate, crossfade_ms=crossfade_ms),
+        sample_rate,
+    )
+
+
+def _post_process_run(
+    audio: np.ndarray,
+    *,
+    orig_sr: int | None,
+    sample_rate: int,
+    rate: float,
+    trim_lead: bool,
+    trim_trail: bool,
+) -> np.ndarray:
+    """Resample, trim the interior edges and time-stretch, off the event loop.
+
+    Every step here is synchronous numpy, and WSOLA alone runs ~0.27s on ten
+    seconds of audio. Left on the loop it stalls every other coroutine in the
+    process for the duration -- including the SSE status stream the UI reads,
+    which is exactly the thing that must keep ticking while a long plan
+    renders.
+
+    Reported by @hakimio on #1036.
+    """
+    if orig_sr is not None:
+        audio = librosa.resample(audio, orig_sr=orig_sr, target_sr=sample_rate)
+    if trim_lead or trim_trail:
+        audio = trim_edges(audio, sample_rate, lead=trim_lead, trail=trim_trail)
+    return apply_rate(audio, rate, sample_rate)
 
 
 def _silence(ms: int, sr: int) -> np.ndarray:
