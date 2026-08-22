@@ -367,7 +367,7 @@ async def stream_speech(
 
     from ..services.prosody.pipeline import engine_capabilities, generate_with_prosody
 
-    supports_instruct, engine_langs = engine_capabilities(engine)
+    supports_instruct, engine_langs = engine_capabilities(engine, model_size)
 
     # The same transformer the persisted path uses, so a streamed preview
     # matches what /generate would produce rather than approximating it.

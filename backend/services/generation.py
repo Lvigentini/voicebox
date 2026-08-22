@@ -100,7 +100,7 @@ async def run_generation(
         # `generations` keeps what the author wrote either way, so History
         # stays readable and editing an entry changes future audio without
         # rewriting the past.
-        supports_instruct, engine_langs = engine_capabilities(engine)
+        supports_instruct, engine_langs = engine_capabilities(engine, model_size)
         audio, sample_rate = await generate_with_prosody(
             text,
             engine=engine,

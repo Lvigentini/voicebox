@@ -329,6 +329,9 @@ class ProsodyPreviewRequest(BaseModel):
     )
     profile_id: Optional[str] = None
     instruct: Optional[str] = Field(None, max_length=500)
+    # Capabilities differ within an engine, so the preview has to be told which
+    # variant will run or it cannot warn accurately about <emphasis>.
+    model_size: Optional[str] = Field(None, max_length=10)
 
 
 class ProsodyPlanNode(BaseModel):

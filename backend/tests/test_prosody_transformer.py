@@ -362,3 +362,53 @@ def test_a_respelled_run_is_still_trivial():
 
 def test_a_break_makes_a_plan_non_trivial():
     assert not plan('a<break time="700ms"/>b').is_trivial
+
+
+# ── Regressions found by @hakimio reviewing #1036 ────────────────────
+#
+# https://github.com/hakimio/voicebox/tree/feat/prosody-user-facing
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Fill in the <subject> field.",
+        "Send it to <language> support.",
+        "Read the <breaking> news.",
+        "Insert <prosodyX> here.",
+        "The <emphasise> spelling is British.",
+        "A <substitute> for sugar.",
+        "Check the <phonemes> list.",
+    ],
+)
+def test_a_tag_name_must_not_match_a_prefix_of_a_longer_word(text):
+    """A word in angle brackets is not a directive.
+
+    Without a boundary after the name, the alternation matched a prefix: the
+    parser read `<subject>` as `<sub>` and raised on the missing alias, and
+    read `<breaking>` as a well-formed `<break>` -- which silently deleted the
+    word and inserted 700ms of silence in its place. Text corruption is the
+    worse half of that pair, because nothing reports it.
+    """
+    assert not has_markup(text)
+    assert texts(plan(text)) == [text]
+    assert strip_markup(text) == text
+
+
+def test_whitespace_glued_onto_a_substituted_run_keeps_source_text_in_step():
+    """`source_text` has to grow with `text` when trailing whitespace is glued on.
+
+    Only reachable when a substitution sits inside a span that gives it
+    non-default attributes, so the whitespace after it cannot coalesce into
+    either neighbour and arrives at the plan loop on its own. The pair then
+    desynchronises, and the preview -- whose entire job is to show the author
+    their own words -- renders a run that is missing whatever followed the
+    closing tag.
+    """
+    p = plan(
+        '<prosody rate="0.8"><sub alias="ban-DEH-ha">bandeja</sub></prosody>'
+        ' <prosody rate="1.2">rapido</prosody>'
+    )
+    substituted = [n for n in p.nodes if isinstance(n, Speech) and n.source_text][0]
+    assert substituted.text == "ban-DEH-ha "
+    assert substituted.source_text == "bandeja "
