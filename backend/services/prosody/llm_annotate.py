@@ -32,6 +32,15 @@ from .parser import ProsodyParseError, has_markup, parse, strip_markup
 
 logger = logging.getLogger(__name__)
 
+# Preference order, best first. Annotation is a structural edit rather than a
+# creative one, so a smaller model does the job -- but a larger one already on
+# disk does it better, and nothing here is worth a download.
+CANDIDATE_MODEL_SIZES = ("4B", "1.7B", "0.6B")
+
+# Kept for callers that name a size explicitly. Nothing should *default* to it:
+# pinning one size made the feature report itself unavailable on an install that
+# had a different one cached, which is the app's own default (0.6B) more often
+# than not.
 DEFAULT_MODEL_SIZE = "1.7B"
 # Low, because this is a structural edit rather than a creative one: the same
 # script should get the same annotation.
@@ -88,22 +97,52 @@ class LLMUnavailableError(RuntimeError):
     """The local LLM is not downloaded, so annotation cannot run."""
 
 
-def is_llm_available(model_size: str = DEFAULT_MODEL_SIZE) -> bool:
-    """Whether the LLM can run without downloading anything first.
+def available_model_size(preferred: str | None = None) -> str | None:
+    """The best LLM size already on disk, or None if there is nothing to use.
 
-    Deliberately does not trigger a download: annotation is optional help, and
-    a feature that silently pulls gigabytes when first used is not optional.
+    *preferred* wins when it is cached; otherwise the largest cached candidate
+    is chosen. Never downloads -- annotation is optional help, and a feature
+    that silently pulls gigabytes the first time it is clicked is not optional.
     """
     try:
         from ..llm import get_llm_model
 
         backend = get_llm_model()
-        if backend.is_loaded():
-            return True
-        return bool(backend._is_model_cached(model_size))
+
+        # Already in memory: that model can annotate right now, whatever is or
+        # is not on disk.
+        try:
+            if backend.is_loaded():
+                return (
+                    getattr(backend, "_current_model_size", None)
+                    or preferred
+                    or CANDIDATE_MODEL_SIZES[-1]
+                )
+        except Exception:
+            logger.debug("LLM load-state check failed", exc_info=True)
+
+        order = [preferred, *CANDIDATE_MODEL_SIZES] if preferred else list(CANDIDATE_MODEL_SIZES)
+        for size in order:
+            try:
+                if backend._is_model_cached(size):
+                    return size
+            except Exception:
+                # An unknown size raises rather than returning False; that is a
+                # bad argument, not a missing model, so keep looking.
+                continue
+        return None
     except Exception:
         logger.debug("LLM availability check failed", exc_info=True)
-        return False
+        return None
+
+
+def is_llm_available(model_size: str | None = None) -> bool:
+    """Whether annotation can run right now without downloading anything.
+
+    With no *model_size* this asks the real question -- is there any usable
+    model -- rather than whether one particular size happens to be present.
+    """
+    return available_model_size(model_size) is not None
 
 
 def validate_annotation(original: str, candidate: str) -> str | None:
@@ -130,7 +169,7 @@ async def annotate_with_llm(
     text: str,
     *,
     language: str = "en",
-    model_size: str = DEFAULT_MODEL_SIZE,
+    model_size: str | None = None,
     max_attempts: int = 2,
 ) -> AnnotationResult:
     """Ask the LLM to mark up *text*.
@@ -145,9 +184,10 @@ async def annotate_with_llm(
     if not text or not text.strip():
         return AnnotationResult(markup=text, accepted=True, model_size=model_size)
 
-    if not is_llm_available(model_size):
+    resolved = available_model_size(model_size)
+    if resolved is None:
         raise LLMUnavailableError(
-            f"The {model_size} LLM is not downloaded. Annotation is optional -- "
+            "No Qwen3 LLM is downloaded. Annotation is optional -- "
             "dictionary entries and hand-written markup work without it."
         )
 
@@ -164,7 +204,7 @@ async def annotate_with_llm(
                 system=SYSTEM_PROMPT,
                 max_tokens=min(2048, len(text) * 2 + 256),
                 temperature=TEMPERATURE,
-                model_size=model_size,
+                model_size=resolved,
                 examples=_EXAMPLES,
             )
         except Exception:
@@ -173,7 +213,7 @@ async def annotate_with_llm(
                 markup=text,
                 accepted=False,
                 rejected_reason="the LLM call failed",
-                model_size=model_size,
+                model_size=resolved,
                 attempts=attempt,
             )
 
@@ -184,7 +224,7 @@ async def annotate_with_llm(
                 return AnnotationResult(
                     markup=candidate,
                     accepted=True,
-                    model_size=model_size,
+                    model_size=resolved,
                     attempts=attempt,
                 )
 
@@ -201,7 +241,7 @@ async def annotate_with_llm(
         markup=text,
         accepted=False,
         rejected_reason=last_reason,
-        model_size=model_size,
+        model_size=resolved,
         attempts=max_attempts,
     )
 

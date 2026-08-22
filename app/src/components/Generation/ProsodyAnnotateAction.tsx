@@ -71,7 +71,12 @@ export function ProsodyAnnotateAction({
               ? t('generation.prosody.annotateUnavailable')
               : tooLong
                 ? t('generation.prosody.annotateTooLong', { max: MAX_ANNOTATE_CHARS })
-                : t('generation.prosody.annotateHint')}
+                : availability?.model_size
+                  ? // Name the model that will actually run. Any cached Qwen3
+                    // will do, and which one it is changes how good the
+                    // suggestion gets.
+                    t('generation.prosody.annotateReady', { size: availability.model_size })
+                  : t('generation.prosody.annotateHint')}
           </p>
         </div>
         <Button

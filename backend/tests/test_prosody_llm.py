@@ -71,7 +71,7 @@ def stub_llm(monkeypatch):
                 index = min(len(calls["prompts"]) - 1, len(replies) - 1)
                 return replies[index]
 
-        monkeypatch.setattr(llm_annotate, "is_llm_available", lambda *_a, **_k: True)
+        monkeypatch.setattr(llm_annotate, "available_model_size", lambda *_a, **_k: "0.6B")
         monkeypatch.setattr(
             "backend.services.llm.get_llm_model", lambda: FakeBackend()
         )
@@ -178,7 +178,7 @@ async def test_an_llm_error_is_not_fatal(stub_llm, monkeypatch):
         async def generate(self, *_a, **_k):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(llm_annotate, "is_llm_available", lambda *_a, **_k: True)
+    monkeypatch.setattr(llm_annotate, "available_model_size", lambda *_a, **_k: "0.6B")
     monkeypatch.setattr("backend.services.llm.get_llm_model", lambda: Exploding())
 
     result = await annotate_with_llm(ORIGINAL)
@@ -202,22 +202,41 @@ async def test_an_unchanged_script_is_accepted(stub_llm):
 async def test_a_missing_model_raises_rather_than_downloading(monkeypatch):
     """Annotation is optional help. A feature that silently pulls gigabytes the
     first time it is used is not optional."""
-    monkeypatch.setattr(llm_annotate, "is_llm_available", lambda *_a, **_k: False)
+    monkeypatch.setattr(llm_annotate, "available_model_size", lambda *_a, **_k: None)
     with pytest.raises(LLMUnavailableError):
         await annotate_with_llm(ORIGINAL)
 
 
 def test_availability_is_reported(client, monkeypatch):
-    monkeypatch.setattr(llm_annotate, "is_llm_available", lambda *_a, **_k: False)
+    """Patched where it is used, not where it is defined.
+
+    The route binds the name at import, so patching the defining module leaves
+    the endpoint calling the real thing -- which is how this test previously
+    passed on a machine with no 1.7B model rather than because of its patch.
+    """
+    monkeypatch.setattr(
+        "backend.routes.prosody.available_model_size", lambda *_a, **_k: None
+    )
     body = client.get("/prosody/annotate/availability").json()
     assert body["available"] is False
+    assert body["model_size"] is None
+
+
+def test_availability_names_the_model_it_would_use(client, monkeypatch):
+    """The client shows which model is about to run, so the endpoint reports the
+    resolved size rather than echoing the request back."""
+    monkeypatch.setattr(
+        "backend.routes.prosody.available_model_size", lambda *_a, **_k: "0.6B"
+    )
+    body = client.get("/prosody/annotate/availability?model_size=1.7B").json()
+    assert body == {"available": True, "model_size": "0.6B"}
 
 
 def test_the_endpoint_409s_without_a_model(client, monkeypatch):
-    monkeypatch.setattr(llm_annotate, "is_llm_available", lambda *_a, **_k: False)
+    monkeypatch.setattr(llm_annotate, "available_model_size", lambda *_a, **_k: None)
     r = client.post("/prosody/annotate", json={"text": ORIGINAL})
     assert r.status_code == 409
-    assert "not downloaded" in r.json()["detail"]
+    assert "downloaded" in r.json()["detail"]
 
 
 @pytest.mark.asyncio
