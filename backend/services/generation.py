@@ -17,6 +17,7 @@ Mode differences:
 from __future__ import annotations
 
 import asyncio
+import json
 import traceback
 from typing import Literal, Optional
 
@@ -101,6 +102,30 @@ async def run_generation(
         # stays readable and editing an entry changes future audio without
         # rewriting the past.
         supports_instruct, engine_langs = engine_capabilities(engine, model_size)
+
+        async def _persist_warnings(plan) -> None:
+            """Put the plan's warnings on the row the status stream reads.
+
+            Written on its own session: the generation runs on a worker and the
+            row has to be visible to the SSE endpoint's session before the
+            audio is finished, which is the whole point -- the author sees that
+            a directive was dropped while they are still waiting, not after.
+            """
+            if not plan.warnings:
+                return
+            warn_db = next(get_db())
+            try:
+                await history.update_generation_status(
+                    generation_id=generation_id,
+                    status="generating",
+                    db=warn_db,
+                    prosody_warnings=json.dumps(
+                        [{"code": w.code, "detail": w.detail} for w in plan.warnings]
+                    ),
+                )
+            finally:
+                warn_db.close()
+
         audio, sample_rate = await generate_with_prosody(
             text,
             engine=engine,
@@ -115,6 +140,7 @@ async def run_generation(
             engine_languages=engine_langs,
             seed=seed,
             enabled=prosody,
+            on_plan=_persist_warnings,
         )
 
         # --- Normalize (generate and regenerate always; retry skips) -----
