@@ -84,8 +84,9 @@ export function ProsodyPlanPreview({
       }),
     enabled: debouncedText.trim().length > 0,
     // A plan is a pure function of its inputs, so a cached one never goes
-    // stale — except through the dictionary, which the caller invalidates by
-    // key when an entry changes.
+    // stale. The exception is the dictionary: editing an entry changes the
+    // plan without changing this key, so whatever gains an editing UI will
+    // need to invalidate 'prosodyPreview'.
     staleTime: Infinity,
     retry: false,
   });
@@ -95,6 +96,14 @@ export function ProsodyPlanPreview({
   useEffect(() => {
     onParseError?.(parseError);
   }, [parseError, onParseError]);
+
+  // Clear the error when this panel goes away. The caller blocks submit on it,
+  // and once unmounted nothing here recompiles — so a message left behind
+  // would keep rejecting every generation, including after the author has
+  // already fixed the markup. No live plan means no grounds to block.
+  useEffect(() => {
+    return () => onParseError?.(null);
+  }, [onParseError]);
 
   if (parseError) {
     return (

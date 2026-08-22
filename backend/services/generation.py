@@ -106,25 +106,24 @@ async def run_generation(
         async def _persist_warnings(plan) -> None:
             """Put the plan's warnings on the row the status stream reads.
 
-            Written on its own session: the generation runs on a worker and the
-            row has to be visible to the SSE endpoint's session before the
-            audio is finished, which is the whole point -- the author sees that
-            a directive was dropped while they are still waiting, not after.
+            Committed before the audio exists, which is the point: the author
+            sees that a directive was dropped while they are still waiting,
+            not afterwards. The SSE endpoint reads on its own session and
+            expires it each tick, so this commit is visible there immediately.
+
+            The status is re-stated rather than changed -- the row is already
+            "generating" by here, and this write only adds the warnings.
             """
             if not plan.warnings:
                 return
-            warn_db = next(get_db())
-            try:
-                await history.update_generation_status(
-                    generation_id=generation_id,
-                    status="generating",
-                    db=warn_db,
-                    prosody_warnings=json.dumps(
-                        [{"code": w.code, "detail": w.detail} for w in plan.warnings]
-                    ),
-                )
-            finally:
-                warn_db.close()
+            await history.update_generation_status(
+                generation_id=generation_id,
+                status="generating",
+                db=bg_db,
+                prosody_warnings=json.dumps(
+                    [{"code": w.code, "detail": w.detail} for w in plan.warnings]
+                ),
+            )
 
         audio, sample_rate = await generate_with_prosody(
             text,

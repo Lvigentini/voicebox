@@ -44,10 +44,11 @@ def engine_capabilities(
     cannot answer correctly. Narrow to the variant that will actually run
     whenever the caller knows it.
 
-    Without a *model_size* the answer stays conservative: a request that has
-    not pinned a size can land on any variant, and claiming a capability the
-    chosen one lacks is the failure this function exists to prevent. Erring the
-    other way only costs a warning that was not strictly necessary.
+    Without a *model_size* -- or with one that matches no config -- the answer
+    stays conservative: such a request can land on any variant, and claiming a
+    capability the chosen one lacks is the failure this function exists to
+    prevent. Erring the other way only costs a warning that was not strictly
+    necessary.
 
     Narrowing by size was @hakimio's observation on #1036.
     """
@@ -58,10 +59,17 @@ def engine_capabilities(
         if not configs:
             return False, None
 
-        if model_size is not None:
-            configs = [c for c in configs if c.model_size == model_size] or configs
-            supports_instruct = configs[0].supports_instruct
+        sized = [c for c in configs if c.model_size == model_size] if model_size else []
+        if sized:
+            configs = sized
+            supports_instruct = sized[0].supports_instruct
         else:
+            # No size given, or one that matches nothing -- `/speak` defaults
+            # model_size to "1.7B" for every engine, including those that have
+            # no sizes at all, so a miss here is routine rather than
+            # exceptional. Falling back to the first config would make the
+            # answer depend on registry order; `all()` is the only answer true
+            # for whichever variant actually runs.
             supports_instruct = all(c.supports_instruct for c in configs)
 
         languages: list[str] = []
