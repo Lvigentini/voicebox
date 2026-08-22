@@ -15,10 +15,9 @@ from ..services import pronunciation
 from ..services.prosody import annotate, compile_plan, rules_from_entries
 from ..services.prosody.ir import Silence, Speech
 from ..services.prosody.llm_annotate import (
-    DEFAULT_MODEL_SIZE,
     LLMUnavailableError,
     annotate_with_llm,
-    is_llm_available,
+    available_model_size,
 )
 from ..services.prosody.parser import ProsodyParseError
 from ..services.prosody.pipeline import engine_capabilities
@@ -85,13 +84,18 @@ async def preview_prosody(
 
 
 @router.get("/prosody/annotate/availability")
-async def annotation_availability(model_size: str = DEFAULT_MODEL_SIZE):
-    """Whether LLM annotation can run right now.
+async def annotation_availability(model_size: str | None = None):
+    """Whether LLM annotation can run right now, and with which model.
 
     Lets a client hide or disable the action instead of offering something that
     will fail. Annotation is optional help -- everything else works without it.
+
+    Reports the size that would actually be used rather than echoing the
+    request: any cached Qwen3 will do, and pinning one size made the feature
+    call itself unavailable on installs that had a different one.
     """
-    return {"available": is_llm_available(model_size), "model_size": model_size}
+    resolved = available_model_size(model_size)
+    return {"available": resolved is not None, "model_size": resolved}
 
 
 @router.post("/prosody/annotate", response_model=models.ProsodyAnnotateResponse)
@@ -110,7 +114,7 @@ async def annotate_prosody(data: models.ProsodyAnnotateRequest):
         result = await annotate_with_llm(
             data.text,
             language=data.language,
-            model_size=data.model_size or DEFAULT_MODEL_SIZE,
+            model_size=data.model_size,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
