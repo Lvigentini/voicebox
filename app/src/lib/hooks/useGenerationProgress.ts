@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '@/components/ui/use-toast';
 import { apiClient } from '@/lib/api/client';
 import { useGenerationSettings } from '@/lib/hooks/useSettings';
@@ -12,6 +13,9 @@ interface GenerationStatusEvent {
   duration?: number;
   error?: string;
   source?: string;
+  /** Prosody directives the engine could not honour. Repeated on every tick so
+   * a late subscriber still receives them, hence the dedupe below. */
+  prosody_warnings?: { code: string; detail: string }[];
 }
 
 // Agent-initiated generations are played by the floating pill, not the
@@ -26,6 +30,7 @@ const AGENT_SOURCES = new Set(['mcp', 'rest']);
 export function useGenerationProgress() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { t } = useTranslation();
   const pendingIds = useGenerationStore((s) => s.pendingGenerationIds);
   const removePendingGeneration = useGenerationStore((s) => s.removePendingGeneration);
   const removePendingStoryAdd = useGenerationStore((s) => s.removePendingStoryAdd);
@@ -42,6 +47,9 @@ export function useGenerationProgress() {
 
   // Track active EventSource instances
   const eventSourcesRef = useRef<Map<string, EventSource>>(new Map());
+  // Generations already warned about, so the repeated SSE payload raises one
+  // toast per generation rather than one per tick.
+  const warnedIdsRef = useRef<Set<string>>(new Set());
 
   // Unmount-only cleanup — close all SSE connections when the hook is torn down
   useEffect(() => {
@@ -62,6 +70,9 @@ export function useGenerationProgress() {
       if (!pendingIds.has(id)) {
         source.close();
         currentSources.delete(id);
+        // Forget the dedupe with the connection, so the set does not grow for
+        // the life of the session and a retry can warn again.
+        warnedIdsRef.current.delete(id);
       }
     }
 
@@ -75,6 +86,18 @@ export function useGenerationProgress() {
       source.onmessage = (event) => {
         try {
           const data: GenerationStatusEvent = JSON.parse(event.data);
+
+          // A directive that silently does nothing reads as the model refusing
+          // to follow it, so say it out loud — once, and while the generation
+          // is still the thing the user is looking at.
+          const warnings = data.prosody_warnings ?? [];
+          if (warnings.length > 0 && !warnedIdsRef.current.has(id)) {
+            warnedIdsRef.current.add(id);
+            toast({
+              title: t('generation.prosody.warningTitle', { count: warnings.length }),
+              description: warnings.map((w) => w.detail).join(' '),
+            });
+          }
 
           if (data.status === 'completed') {
             source.close();
@@ -160,5 +183,6 @@ export function useGenerationProgress() {
     queryClient,
     toast,
     setAudioWithAutoPlay,
+    t,
   ]);
 }
