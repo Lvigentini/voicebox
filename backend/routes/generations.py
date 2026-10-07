@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import config, models
-from ..services import history, personality, profiles, tts
+from ..services import history, personality, profiles, pronunciation, tts
 from ..database import Generation as DBGeneration, VoiceProfile as DBVoiceProfile, get_db
 from ..services.generation import release_generation_memory, run_generation
 from ..services.task_queue import cancel_generation as cancel_generation_job, enqueue_generation

@@ -22,7 +22,7 @@ import traceback
 from typing import Literal, Optional
 
 from .. import config
-from . import history, profiles
+from . import history, profiles, pronunciation
 from ..database import get_db
 from ..utils.tasks import get_task_manager
 
