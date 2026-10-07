@@ -215,6 +215,17 @@ def test_regex_metacharacters_in_a_term_are_literal(db):
 # ── API ──────────────────────────────────────────────────────────────
 
 
+def test_filtered_listing_is_ordered_like_the_full_one(client, db):
+    """Both branches of GET /pronunciations must return the same order, or a
+    management screen jumps around the moment a filter is applied."""
+    for term in ("zorro", "alpha", "mango"):
+        client.post("/pronunciations", json={"term": term, "replacement": term, "language": "es"})
+    unfiltered = [e["term"] for e in client.get("/pronunciations").json()]
+    filtered = [e["term"] for e in client.get("/pronunciations", params={"language": "es"}).json()]
+    assert unfiltered == ["alpha", "mango", "zorro"]
+    assert filtered == unfiltered
+
+
 def test_crud_roundtrip(client, db):
     created = client.post(
         "/pronunciations", json={"term": "bandeja", "replacement": "ban-DEH-ha", "language": "en"}

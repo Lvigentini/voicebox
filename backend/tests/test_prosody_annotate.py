@@ -24,6 +24,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from backend.services.prosody import Speech, TermRule, annotate, compile_plan
 
 BANDEJA = TermRule(term="bandeja", replacement="bandeha")
+# A language code with a quote in it: whatever is stored must not be able to
+# end the attribute early and change the markup's meaning.
+QUOTED_LANG = TermRule(term="bandeja", replacement="bandeja", strategy="language", spoken_language='es" x="y')
 VIBORA = TermRule(
     term="víbora", replacement="víbora", strategy="language", spoken_language="es"
 )
@@ -200,3 +203,14 @@ def test_dictionary_terms_compose_with_hand_written_directives():
     plan = compile_plan(out, engine="qwen", default_language="en", supports_instruct=True)
     assert any(getattr(n, "ms", None) == 700 for n in plan.nodes)
     assert any("bandeha" in getattr(n, "text", "") for n in plan.nodes)
+
+
+def test_a_language_code_is_escaped_in_the_attribute():
+    """spoken_language comes from a database row, so it gets the same
+    treatment as phonemes: a quote inside it cannot close the attribute."""
+    markup, applied = annotate("a bandeja b", [QUOTED_LANG])
+    assert applied == ["bandeja"]
+    assert 'xml:lang="es&quot; x=&quot;y"' in markup
+    plan = compile_plan(markup, engine="qwen", default_language="en")
+    run = next(n for n in plan.nodes if isinstance(n, Speech) and n.language != "en")
+    assert run.language == 'es" x="y', "the stored value round-trips as one attribute"

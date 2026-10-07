@@ -102,16 +102,18 @@ async def run_generation(
         trim_fn = trim_tts_output if engine_needs_trim(engine) else None
         runaway_detector = has_tts_runaway if engine_retries_runaway(engine) else None
 
+        # A regenerate asks for a new variation, so no seed goes to either path:
+        # the single-shot call or the per-run seeds the plan derives from it.
+        # An explicitly requested seed is the caller asking for a specific
+        # result -- usually to reproduce a take they liked -- so it wins.
+        effective_seed = (
+            seed
+            if mode != "regenerate" or (version_overrides or {}).get("seed") is not None
+            else None
+        )
         gen_kwargs: dict = dict(
             language=language,
-            # A regenerate normally drops the seed so the take varies. An
-            # explicitly requested one is the caller asking for a specific
-            # result -- usually to reproduce a take they liked -- so it wins.
-            seed=(
-                seed
-                if mode != "regenerate" or (version_overrides or {}).get("seed") is not None
-                else None
-            ),
+            seed=effective_seed,
             instruct=instruct,
             trim_fn=trim_fn,
             runaway_detector=runaway_detector,
@@ -163,7 +165,7 @@ async def run_generation(
             profile_id=profile_id,
             supports_instruct=supports_instruct,
             engine_languages=engine_langs,
-            seed=seed,
+            seed=effective_seed,
             enabled=prosody,
             on_plan=_persist_warnings,
         )

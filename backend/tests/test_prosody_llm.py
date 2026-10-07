@@ -10,6 +10,7 @@ Usage:
     python -m pytest backend/tests/test_prosody_llm.py -v
 """
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -167,6 +168,27 @@ async def test_persistent_failure_returns_the_original(stub_llm):
     assert result.markup == ORIGINAL
     assert result.rejected_reason
     assert not result.changed
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_llm_is_cut_off(monkeypatch):
+    """A local model that never answers must not hold the request open."""
+
+    class Stalled:
+        def is_loaded(self):
+            return True
+
+        async def generate(self, *_a, **_k):
+            await asyncio.sleep(5)
+
+    monkeypatch.setattr(llm_annotate, "ANNOTATE_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(llm_annotate, "is_llm_available", lambda *_a, **_k: True)
+    monkeypatch.setattr("backend.services.llm.get_llm_model", lambda: Stalled())
+
+    result = await annotate_with_llm(ORIGINAL)
+    assert not result.accepted
+    assert result.markup == ORIGINAL
+    assert "timed out" in result.rejected_reason
 
 
 @pytest.mark.asyncio
