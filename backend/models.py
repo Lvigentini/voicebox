@@ -2,9 +2,9 @@
 Pydantic models for request/response validation.
 """
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 from typing_extensions import Annotated
-from typing import Optional, List
+from typing import Any, Optional, List
 from datetime import datetime
 
 from .utils.capture_chords import (
@@ -153,7 +153,7 @@ class GenerationRequest(BaseModel):
     seed: Optional[int] = Field(None, ge=0)
     model_size: Optional[str] = Field(default="1.7B", pattern="^(1\\.7B|0\\.6B|1B|3B)$")
     instruct: Optional[str] = Field(None, max_length=500)
-    engine: Optional[str] = Field(default="qwen", pattern="^(qwen|qwen_custom_voice|luxtts|chatterbox|chatterbox_turbo|tada|kokoro)$")
+    engine: Optional[str] = Field(default=None, pattern="^(qwen|qwen_custom_voice|qwen_voice_design|luxtts|chatterbox|chatterbox_turbo|tada|kokoro|omnivoice)$")
     personality: bool = Field(
         default=False,
         description="When true and the profile has a personality prompt, the input text is rewritten in-character before TTS.",
@@ -540,6 +540,38 @@ class CaptureSettingsResponse(BaseModel):
     chord_toggle_to_talk_keys: List[str] = Field(
         default_factory=default_toggle_to_talk_chord
     )
+    custom_llm_endpoint: Optional[str] = None
+    custom_llm_model: Optional[str] = None
+    # Provider credential — write-only. The response reports whether one is
+    # configured but never echoes the value, so the settings API can't be
+    # used to exfiltrate stored keys and the frontend can't rehydrate them
+    # into React state where a browser cache could pick them up.
+    custom_llm_api_key_configured: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _mask_custom_llm_api_key(cls, data: Any) -> Any:
+        """Replace the raw ``custom_llm_api_key`` with a boolean ``_configured`` flag.
+
+        Runs before field validation so the stored credential is never
+        materialised on a Response instance, even in memory. Accepts both
+        SQLAlchemy ORM rows (``from_attributes=True`` path) and plain dicts
+        so tests that construct the model directly get the same treatment.
+        """
+        if isinstance(data, dict):
+            raw_key = data.pop("custom_llm_api_key", None)
+            data.setdefault("custom_llm_api_key_configured", bool(raw_key))
+            return data
+        # ORM row — build a snapshot dict, drop the secret, and hand the
+        # rest to Pydantic. ``from_attributes`` won't reach the raw
+        # attribute anymore because the returned dict wins.
+        columns = getattr(getattr(data, "__table__", None), "columns", None)
+        if columns is None:
+            return data
+        snapshot = {c.name: getattr(data, c.name, None) for c in columns}
+        raw_key = snapshot.pop("custom_llm_api_key", None)
+        snapshot["custom_llm_api_key_configured"] = bool(raw_key)
+        return snapshot
 
     class Config:
         from_attributes = True
@@ -560,6 +592,9 @@ class CaptureSettingsUpdate(BaseModel):
     hotkey_enabled: Optional[bool] = None
     chord_push_to_talk_keys: Optional[List[str]] = Field(default=None, min_length=1, max_length=6)
     chord_toggle_to_talk_keys: Optional[List[str]] = Field(default=None, min_length=1, max_length=6)
+    custom_llm_endpoint: Optional[str] = None
+    custom_llm_model: Optional[str] = None
+    custom_llm_api_key: Optional[str] = None
 
 
 class GenerationSettingsResponse(BaseModel):
@@ -585,7 +620,7 @@ class GenerationSettingsUpdate(BaseModel):
 
 class MCPClientBindingResponse(BaseModel):
     """Per-MCP-client voice binding — what voice / engine the server should
-    use when a given client_id calls voicebox.speak without args, plus an
+    use when a given client_id calls voicebox_speak without args, plus an
     opt-in personality-rewrite default."""
 
     client_id: str
@@ -593,7 +628,7 @@ class MCPClientBindingResponse(BaseModel):
     profile_id: Optional[str] = None
     default_engine: Optional[str] = Field(
         None,
-        pattern="^(qwen|qwen_custom_voice|luxtts|chatterbox|chatterbox_turbo|tada|kokoro)$",
+        pattern="^(qwen|qwen_custom_voice|qwen_voice_design|luxtts|chatterbox|chatterbox_turbo|tada|kokoro|omnivoice)$",
     )
     default_personality: bool = False
     last_seen_at: Optional[datetime] = None
@@ -612,7 +647,7 @@ class MCPClientBindingUpsert(BaseModel):
     profile_id: Optional[str] = None
     default_engine: Optional[str] = Field(
         None,
-        pattern="^(qwen|qwen_custom_voice|luxtts|chatterbox|chatterbox_turbo|tada|kokoro)$",
+        pattern="^(qwen|qwen_custom_voice|qwen_voice_design|luxtts|chatterbox|chatterbox_turbo|tada|kokoro|omnivoice)$",
     )
     default_personality: bool = False
 
@@ -622,7 +657,7 @@ class MCPClientBindingListResponse(BaseModel):
 
 
 class SpeakRequest(BaseModel):
-    """Body for POST /speak — non-MCP REST surface that mirrors voicebox.speak."""
+    """Body for POST /speak — non-MCP REST surface that mirrors voicebox_speak."""
 
     text: str = Field(..., min_length=1, max_length=10000)
     profile: Optional[str] = Field(
@@ -631,7 +666,7 @@ class SpeakRequest(BaseModel):
     )
     engine: Optional[str] = Field(
         None,
-        pattern="^(qwen|qwen_custom_voice|luxtts|chatterbox|chatterbox_turbo|tada|kokoro)$",
+        pattern="^(qwen|qwen_custom_voice|qwen_voice_design|luxtts|chatterbox|chatterbox_turbo|tada|kokoro|omnivoice)$",
     )
     personality: Optional[bool] = Field(
         None,
@@ -719,12 +754,13 @@ class HealthResponse(BaseModel):
     vram_used_mb: Optional[float] = None
     backend_type: Optional[str] = None  # Backend type (mlx or pytorch)
     backend_variant: Optional[str] = None  # Binary variant (cpu, cuda, or rocm)
-    supports_rocm: bool = False  # AMD GPU on Windows — the ROCm backend is applicable
+    supports_rocm: bool = False  # AMD GPU on Windows or Linux (/dev/kfd) — ROCm backend applicable
     gpu_compatibility_warning: Optional[str] = None  # Warning if GPU arch unsupported
     # ffmpeg is optional; when absent, loudness normalisation is unavailable
     # and m4a/aac/webm cannot be imported. The UI labels those rather than
     # letting them fail silently.
     ffmpeg_available: bool = False
+    cloud_enabled: bool = False  # VOICEBOX_CLOUD_ENABLED — the app shows the Cloud section only when true
 
 
 class DirectoryCheck(BaseModel):
@@ -763,10 +799,49 @@ class ModelStatusListResponse(BaseModel):
     models: List[ModelStatus]
 
 
+class EngineCapabilities(BaseModel):
+    """What one TTS engine can actually do.
+
+    Derived from the model registry rather than hand-maintained, so a client
+    never has to keep its own copy of which engines honour what.
+    """
+
+    engine: str
+    display_name: str
+    supports_instruct: bool = Field(
+        description=(
+            "Whether the engine honours the instruct kwarg. Base Qwen3-TTS "
+            "accepts it and ignores it, so this is False there."
+        )
+    )
+    languages: List[str]
+    model_sizes: List[str]
+    has_model_sizes: bool
+
+
+class EngineCapabilitiesListResponse(BaseModel):
+    """Response model for the engine capability list."""
+
+    engines: List[EngineCapabilities]
+
+
 class ModelDownloadRequest(BaseModel):
     """Request model for triggering model download."""
 
     model_name: str
+
+
+class ModelLoadRequest(BaseModel):
+    """Request model for loading or unloading a model by name.
+
+    ``model_name`` is one of the ids returned by ``GET /models/status``
+    (e.g. ``"kokoro"``, ``"qwen-tts-0.6B"``, ``"whisper-turbo"``).
+    ``model_size`` is the legacy Qwen-only selector, kept so existing
+    ``POST /models/load?model_size=0.6B`` callers keep working.
+    """
+
+    model_name: Optional[str] = None
+    model_size: Optional[str] = None
 
 
 class ModelMigrateRequest(BaseModel):
@@ -1076,6 +1151,23 @@ class EffectPresetResponse(BaseModel):
         from_attributes = True
 
 
+class RegenerateRequest(BaseModel):
+    """Optional overrides for a regenerate.
+
+    Every field is optional; omitted ones reuse the generation's settings.
+    Send ``text`` to fix a typo and re-run without losing the take that had it,
+    or ``language`` to re-read one segment in another language.
+    """
+
+    text: Optional[str] = Field(None, min_length=1, max_length=50000)
+    language: Optional[str] = Field(
+        None, pattern="^(zh|en|ja|ko|de|fr|ru|pt|es|it|he|ar|da|el|fi|hi|ms|nl|no|pl|sv|sw|tr)$"
+    )
+    instruct: Optional[str] = Field(None, max_length=500)
+    # A regenerate normally varies the seed. Set this to reproduce a take.
+    seed: Optional[int] = Field(None, ge=0)
+
+
 class GenerationVersionResponse(BaseModel):
     """Response model for a generation version."""
 
@@ -1086,6 +1178,13 @@ class GenerationVersionResponse(BaseModel):
     effects_chain: Optional[List[EffectConfig]] = None
     source_version_id: Optional[str] = None
     is_default: bool
+    # What produced this take, when it differed from the generation's own
+    # settings. NULL means it used the generation's, so a client showing "the
+    # current take" reads these first and falls back to the generation.
+    text: Optional[str] = None
+    language: Optional[str] = None
+    instruct: Optional[str] = None
+    seed: Optional[int] = None
     created_at: datetime
 
     class Config:

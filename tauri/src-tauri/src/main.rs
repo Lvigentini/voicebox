@@ -213,6 +213,35 @@ struct ServerState {
     backend_override: Mutex<Option<String>>,
 }
 
+/// The data directory requested via `VOICEBOX_DATA_DIR`, if any, resolved
+/// against `base` when the value is relative.
+///
+/// Unset, empty and whitespace-only all mean "no override", so an env var
+/// cleared to "" falls back to the platform path rather than resolving to the
+/// current working directory.
+///
+/// Relative values must be made absolute here. The ROCm and CUDA branches
+/// spawn the sidecar with `current_dir()` set to the backend's onedir folder,
+/// so a relative `--data-dir` would resolve against that folder instead of
+/// where the user meant — and to a different place than the CPU path, which
+/// does not change the working directory.
+fn data_dir_override(
+    env_value: Option<String>,
+    base: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    match env_value {
+        Some(value) if !value.trim().is_empty() => {
+            let path = std::path::Path::new(value.trim());
+            Some(if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                base.join(path)
+            })
+        }
+        _ => None,
+    }
+}
+
 fn backend_override_file(data_dir: &std::path::Path) -> std::path::PathBuf {
     data_dir.join("backend_override")
 }
@@ -406,19 +435,32 @@ async fn start_server(
     // Brief wait for port to be released
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    // Get app data directory
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    // Get app data directory. VOICEBOX_DATA_DIR takes precedence over the
+    // platform app-data path: the sidecar is always spawned with an explicit
+    // --data-dir, and that argument beats the environment variable on the
+    // Python side, so resolving it here is the only place the documented
+    // override can reach the desktop app.
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("Failed to read the current directory: {}", e))?;
+    let (data_dir, data_dir_source) =
+        match data_dir_override(std::env::var("VOICEBOX_DATA_DIR").ok(), &cwd) {
+            Some(path) => (path, "VOICEBOX_DATA_DIR"),
+            None => (
+                app.path()
+                    .app_data_dir()
+                    .map_err(|e| format!("Failed to get app data dir: {}", e))?,
+                "app data dir",
+            ),
+        };
 
-    // Ensure data directory exists
+    // Ensure data directory exists. Naming the path matters here: a typo in
+    // VOICEBOX_DATA_DIR surfaces as a startup error the user can act on.
     std::fs::create_dir_all(&data_dir)
-        .map_err(|e| format!("Failed to create data dir: {}", e))?;
+        .map_err(|e| format!("Failed to create data dir {:?}: {}", data_dir, e))?;
 
     println!("=================================================================");
     println!("Starting voicebox-server sidecar");
-    println!("Data directory: {:?}", data_dir);
+    println!("Data directory: {:?} (from {})", data_dir, data_dir_source);
     println!("Remote mode: {}", remote.unwrap_or(false));
 
     // Check for ROCm backend in data directory (onedir layout: backends/rocm/)
@@ -1379,6 +1421,23 @@ async fn debug_clipboard_roundtrip(
     }))
 }
 
+/// Final step of the main-window close flow, after the frontend has had its
+/// chance to stop the server.
+///
+/// On Linux, closing the main window must exit the process: the hidden dictate
+/// pill webview is still a window, so Tauri would otherwise keep running with
+/// no UI, the backend already stopped, and `speak_monitor` retrying
+/// `/events/speak` every 30 s (#1040). On macOS and Windows the window just
+/// closes, as before, so "Keep server running" plus the global hotkey keep
+/// dictation available without the main window.
+fn finish_main_window_close(window: &tauri::Window) {
+    if cfg!(target_os = "linux") {
+        window.app_handle().exit(0);
+    } else {
+        window.close().ok();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1434,7 +1493,7 @@ pub fn run() {
                     }
                 });
 
-                // Agent-initiated speech (voicebox.speak over MCP or POST /speak)
+                // Agent-initiated speech (voicebox_speak over MCP or POST /speak)
                 // pops the pill up so the user can see what's coming out of their
                 // machine. The `dictate:show` listener is kept for any frontend
                 // caller that wants to force-surface the pill directly, but the
@@ -1550,7 +1609,7 @@ pub fn run() {
 
                 if let Err(e) = app_handle.emit("window-close-requested", ()) {
                     eprintln!("Failed to emit window-close-requested event: {}", e);
-                    window.close().ok();
+                    finish_main_window_close(window);
                     return;
                 }
 
@@ -1566,11 +1625,12 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     tokio::select! {
                         _ = rx.recv() => {
-                            window_for_close.close().ok();
+                            println!("Frontend cleanup complete, closing");
+                            finish_main_window_close(&window_for_close);
                         }
                         _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {
                             eprintln!("Window close timeout, closing anyway");
-                            window_for_close.close().ok();
+                            finish_main_window_close(&window_for_close);
                         }
                     }
                     window_for_close.unlisten(listener_id);
@@ -1656,4 +1716,71 @@ pub fn run() {
 
 fn main() {
     run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::data_dir_override;
+    use std::path::{Path, PathBuf};
+
+    /// Stand-in for the process working directory. Absolute on both platforms
+    /// so `is_absolute()` behaves the same in CI as it does locally.
+    fn base() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(r"C:\work")
+        } else {
+            PathBuf::from("/work")
+        }
+    }
+
+    #[test]
+    fn unset_means_no_override() {
+        assert_eq!(data_dir_override(None, &base()), None);
+    }
+
+    #[test]
+    fn empty_and_whitespace_mean_no_override() {
+        // An env var cleared to "" must not resolve to the process CWD.
+        assert_eq!(data_dir_override(Some(String::new()), &base()), None);
+        assert_eq!(data_dir_override(Some("   ".to_string()), &base()), None);
+        assert_eq!(data_dir_override(Some("\t\n".to_string()), &base()), None);
+    }
+
+    #[test]
+    fn an_absolute_path_is_used_verbatim() {
+        let absolute = if cfg!(windows) {
+            r"C:\Users\me\Audio\Voicebox"
+        } else {
+            "/home/me/voicebox"
+        };
+        assert_eq!(
+            data_dir_override(Some(absolute.to_string()), &base()),
+            Some(PathBuf::from(absolute))
+        );
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_trimmed() {
+        // Windows env vars set through the GUI often carry a trailing space.
+        let absolute = if cfg!(windows) {
+            r"C:\Users\me\Audio\Voicebox"
+        } else {
+            "/home/me/voicebox"
+        };
+        assert_eq!(
+            data_dir_override(Some(format!("  {}  ", absolute)), &base()),
+            Some(PathBuf::from(absolute))
+        );
+    }
+
+    #[test]
+    fn a_relative_path_is_resolved_against_the_base() {
+        // The ROCm and CUDA branches spawn with a different working directory,
+        // so a relative value must be pinned before it reaches --data-dir.
+        let resolved = data_dir_override(Some("voicebox-data".to_string()), &base())
+            .expect("relative value should still be an override");
+        assert!(resolved.is_absolute(), "{:?} should be absolute", resolved);
+        assert_eq!(resolved, base().join("voicebox-data"));
+        assert!(!resolved.starts_with(Path::new("backends")));
+    }
 }

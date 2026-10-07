@@ -8,6 +8,7 @@ version and any number of processed versions with different effects chains.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -20,6 +21,8 @@ from ..database import (
 )
 from ..models import GenerationVersionResponse, EffectConfig
 from .. import config
+
+logger = logging.getLogger(__name__)
 
 
 def _version_response(v: DBGenerationVersion) -> GenerationVersionResponse:
@@ -36,6 +39,10 @@ def _version_response(v: DBGenerationVersion) -> GenerationVersionResponse:
         effects_chain=effects_chain,
         source_version_id=v.source_version_id,
         is_default=v.is_default,
+        text=v.text,
+        language=v.language,
+        instruct=v.instruct,
+        seed=v.seed,
         created_at=v.created_at,
     )
 
@@ -87,11 +94,20 @@ def create_version(
     effects_chain: Optional[List[dict]] = None,
     is_default: bool = False,
     source_version_id: Optional[str] = None,
+    text: Optional[str] = None,
+    language: Optional[str] = None,
+    instruct: Optional[str] = None,
+    seed: Optional[int] = None,
 ) -> GenerationVersionResponse:
     """Create a new version for a generation.
 
     If ``is_default`` is True, all other versions for this generation
     are un-defaulted first.
+
+    ``text``, ``language``, ``instruct`` and ``seed`` record what produced this
+    take when it differs from the generation's own settings. Leave them None
+    when the take used the generation's settings unchanged -- NULL reads as
+    "same as the generation", which is what keeps pre-existing rows correct.
     """
     if is_default:
         _clear_defaults(generation_id, db)
@@ -104,6 +120,10 @@ def create_version(
         effects_chain=json.dumps(effects_chain) if effects_chain else None,
         source_version_id=source_version_id,
         is_default=is_default,
+        text=text,
+        language=language,
+        instruct=instruct,
+        seed=seed,
     )
     db.add(version)
     db.commit()
@@ -184,8 +204,19 @@ def delete_version(version_id: str, db: Session) -> bool:
     return True
 
 
-def delete_versions_for_generation(generation_id: str, db: Session) -> int:
-    """Delete all versions for a generation (used when deleting a generation)."""
+def delete_versions_for_generation(generation_id: str, db: Session, commit: bool = True) -> int:
+    """Delete all versions for a generation (used when deleting a generation).
+
+    This runs as part of a wider cascade — deleting one generation, sweeping
+    failed ones, or deleting a whole profile. A version file the OS won't let
+    us remove (locked by playback on Windows) must not abort that cascade and
+    strand the caller half-deleted, so the row goes regardless and the leaked
+    file is logged. ``delete_version`` keeps raising, because a single
+    user-initiated delete should fail loudly.
+
+    Pass ``commit=False`` when the caller owns the transaction and will commit
+    the whole cascade itself.
+    """
     versions = (
         db.query(DBGenerationVersion)
         .filter_by(generation_id=generation_id)
@@ -195,10 +226,15 @@ def delete_versions_for_generation(generation_id: str, db: Session) -> int:
     for v in versions:
         audio_path = config.resolve_storage_path(v.audio_path)
         if audio_path is not None and audio_path.exists():
-            audio_path.unlink()
+            try:
+                audio_path.unlink()
+            except OSError:
+                logger.warning(
+                    "Could not delete version audio %s; removing the row anyway", audio_path
+                )
         db.delete(v)
         count += 1
-    if count > 0:
+    if count > 0 and commit:
         db.commit()
     return count
 

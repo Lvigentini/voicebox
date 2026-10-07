@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import type {
-  ExportAudioFormat,
   StoryCreate,
+  StoryExportFormat,
   StoryItemBatchUpdate,
   StoryItemCreate,
   StoryItemFadeUpdate,
@@ -321,14 +321,20 @@ export function useExportStoryAudio() {
       storyId,
       storyName,
       format = 'wav',
+      chapters,
       normalizeLoudness = false,
     }: {
       storyId: string;
       storyName: string;
-      format?: ExportAudioFormat;
+      format?: StoryExportFormat;
+      chapters?: 'none' | 'auto';
       normalizeLoudness?: boolean;
     }) => {
-      const blob = await apiClient.exportStoryAudio(storyId, { format, normalizeLoudness });
+      const blob = await apiClient.exportStoryAudio(storyId, {
+        format,
+        chapters,
+        normalizeLoudness,
+      });
 
       // Create safe filename
       const safeName = storyName

@@ -4,15 +4,17 @@ import asyncio
 import logging
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import config, models
-from ..services import history, personality, profiles, tts
+from ..backends import engine_supports_instruct, get_engine_capabilities
+from ..services import history, personality, profiles, pronunciation, tts
 from ..database import Generation as DBGeneration, VoiceProfile as DBVoiceProfile, get_db
-from ..services.generation import run_generation
+from ..services.generation import release_generation_memory, run_generation
 from ..services.task_queue import cancel_generation as cancel_generation_job, enqueue_generation
 from ..utils import ffmpeg
 from ..utils.audio import load_audio
@@ -70,7 +72,28 @@ def _get_or_create_import_profile(db: Session) -> DBVoiceProfile:
 
 
 def _resolve_generation_engine(data: models.GenerationRequest, profile) -> str:
-    return data.engine or getattr(profile, "default_engine", None) or getattr(profile, "preset_engine", None) or "qwen"
+    return data.engine or profiles.default_engine_for_profile(profile)
+
+
+def _warn_if_instruct_ignored(instruct: Optional[str], engine: str) -> None:
+    """Log when delivery instructions are about to be discarded.
+
+    Base Qwen3-TTS takes ``instruct`` and ignores it. The desktop app hides
+    the field for such engines, but API and MCP callers have no such cue and
+    would otherwise watch their instructions vanish with no signal anywhere —
+    which reads as the model refusing to follow them.
+    """
+    if not instruct or not instruct.strip():
+        return
+    if engine_supports_instruct(engine):
+        return
+    logger.warning(
+        "Engine %r does not honour `instruct`; the delivery instruction was "
+        "ignored. Engines that honour it: %s. See GET /engines.",
+        engine,
+        ", ".join(sorted(e["engine"] for e in get_engine_capabilities() if e["supports_instruct"]))
+        or "none",
+    )
 
 
 @router.post("/generate", response_model=models.GenerationResponse)
@@ -93,6 +116,7 @@ async def generate_speech(
         profiles.validate_profile_engine(profile, engine)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _warn_if_instruct_ignored(data.instruct, engine)
 
     model_size = (data.model_size or "1.7B") if engine_has_model_sizes(engine) else None
 
@@ -212,13 +236,34 @@ async def retry_generation(generation_id: str, db: Session = Depends(get_db)):
     "/generate/{generation_id}/regenerate",
     response_model=models.GenerationResponse,
 )
-async def regenerate_generation(generation_id: str, db: Session = Depends(get_db)):
-    """Re-run TTS with the same parameters and save the result as a new version."""
+async def regenerate_generation(
+    generation_id: str,
+    data: Optional[models.RegenerateRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Re-run TTS and save the result as a new version.
+
+    With no body this reruns the generation unchanged, as before. With
+    overrides it reruns using them -- correcting a typo without discarding the
+    take that had it, or re-reading one segment in another language.
+
+    The generation row is never rewritten. It keeps the text as first written,
+    and each take records what produced it, so the old take stays playable and
+    attributable instead of becoming audio nobody can account for.
+    """
     gen = db.query(DBGeneration).filter_by(id=generation_id).first()
     if not gen:
         raise HTTPException(status_code=404, detail="Generation not found")
     if (gen.status or "completed") != "completed":
         raise HTTPException(status_code=400, detail="Generation must be completed to regenerate")
+
+    overrides = data.model_dump(exclude_unset=True) if data else {}
+    text = overrides.get("text", gen.text)
+    language = overrides.get("language", gen.language)
+    instruct = overrides.get("instruct", gen.instruct)
+    seed = overrides.get("seed", gen.seed)
+
+    engine = gen.engine or "qwen"
 
     gen.status = "generating"
     gen.error = None
@@ -229,7 +274,7 @@ async def regenerate_generation(generation_id: str, db: Session = Depends(get_db
     task_manager.start_generation(
         task_id=generation_id,
         profile_id=gen.profile_id,
-        text=gen.text,
+        text=text,
     )
 
     version_id = str(uuid.uuid4())
@@ -239,14 +284,19 @@ async def regenerate_generation(generation_id: str, db: Session = Depends(get_db
         run_generation(
             generation_id=generation_id,
             profile_id=gen.profile_id,
-            text=gen.text,
-            language=gen.language,
-            engine=gen.engine or "qwen",
+            text=text,
+            language=language,
+            engine=engine,
             model_size=gen.model_size or "1.7B",
-            seed=gen.seed,
-            instruct=gen.instruct,
+            seed=seed,
+            instruct=instruct,
             mode="regenerate",
             version_id=version_id,
+            # Only what the caller actually overrode is recorded. A field that
+            # matched the generation stays NULL, so "same as the generation"
+            # and "explicitly set to the same value" do not become
+            # indistinguishable rows.
+            version_overrides=overrides,
         )
     )
 
@@ -363,6 +413,7 @@ async def stream_speech(
         profiles.validate_profile_engine(profile, engine)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _warn_if_instruct_ignored(data.instruct, engine)
     tts_model = get_tts_backend_for_engine(engine)
     model_size = data.model_size or "1.7B"
 
@@ -394,29 +445,32 @@ async def stream_speech(
 
     # The same transformer the persisted path uses, so a streamed preview
     # matches what /generate would produce rather than approximating it.
-    audio, sample_rate = await generate_with_prosody(
-        data.text,
-        engine=engine,
-        language=data.language,
-        generate_chunked_fn=generate_chunked,
-        tts_model=tts_model,
-        voice_prompt=voice_prompt,
-        gen_kwargs=dict(
+    try:
+        audio, sample_rate = await generate_with_prosody(
+            data.text,
+            engine=engine,
             language=data.language,
+            generate_chunked_fn=generate_chunked,
+            tts_model=tts_model,
+            voice_prompt=voice_prompt,
+            gen_kwargs=dict(
+                language=data.language,
+                seed=data.seed,
+                instruct=data.instruct,
+                max_chunk_chars=data.max_chunk_chars,
+                crossfade_ms=data.crossfade_ms,
+                trim_fn=trim_fn,
+                runaway_detector=runaway_detector,
+            ),
+            db=db,
+            profile_id=data.profile_id,
+            supports_instruct=supports_instruct,
+            engine_languages=engine_langs,
             seed=data.seed,
-            instruct=data.instruct,
-            max_chunk_chars=data.max_chunk_chars,
-            crossfade_ms=data.crossfade_ms,
-            trim_fn=trim_fn,
-            runaway_detector=runaway_detector,
-        ),
-        db=db,
-        profile_id=data.profile_id,
-        supports_instruct=supports_instruct,
-        engine_languages=engine_langs,
-        seed=data.seed,
-        enabled=data.prosody,
-    )
+            enabled=data.prosody,
+        )
+    finally:
+        release_generation_memory(tts_model)
 
     effects_chain_config = None
     if data.effects_chain is not None:

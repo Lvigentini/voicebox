@@ -1,6 +1,7 @@
 import { FolderPlus, Info, LayoutGrid, List, Mic, Search, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { isProfileCompatibleWithEngine } from '@/components/Generation/EngineModelSelector';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -27,9 +28,6 @@ import { ProfileCard } from './ProfileCard';
 import { ProfileForm } from './ProfileForm';
 import { ProfileRow } from './ProfileRow';
 import { VoicePreviewDialog } from './VoicePreviewDialog';
-
-/** Engines that use preset (built-in) voices instead of cloned profiles. */
-const PRESET_ENGINES = new Set(['kokoro', 'qwen_custom_voice']);
 
 /** Sentinel key for the Uncategorised bucket, which has no folder id. */
 const UNCATEGORISED = '__uncategorised__';
@@ -97,15 +95,11 @@ export function ProfileList({ search = '', onClearSearch }: ProfileListProps) {
 
   const allProfiles = useMemo(() => profiles || [], [profiles]);
   const voiceFolders = useMemo(() => folders || [], [folders]);
-  const isPresetEngine = PRESET_ENGINES.has(selectedEngine);
 
   /** Whether a profile is supported by the currently selected engine. */
   const isSupported = useMemo(
-    () => (p: VoiceProfileResponse) =>
-      isPresetEngine
-        ? p.voice_type === 'preset' && p.preset_engine === selectedEngine
-        : p.voice_type !== 'preset',
-    [isPresetEngine, selectedEngine],
+    () => (p: VoiceProfileResponse) => isProfileCompatibleWithEngine(p, selectedEngine),
+    [selectedEngine],
   );
 
   const query = search.trim().toLowerCase();
