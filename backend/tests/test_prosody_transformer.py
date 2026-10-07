@@ -53,7 +53,17 @@ def codes(p: RenderPlan) -> list[str]:
 
 @pytest.mark.parametrize(
     "text",
-    ["5 < 6 and 7 > 6", "Tom & Jerry", "a <notatag> b", "if x<y then", "100% > 50%"],
+    [
+        "5 < 6 and 7 > 6",
+        "Tom & Jerry",
+        "a <notatag> b",
+        "if x<y then",
+        "100% > 50%",
+        # Words that merely start with a tag name are not tags.
+        "<breaking> news",
+        "<language> barrier",
+        "Change the <subject> line",
+    ],
 )
 def test_prose_that_would_break_an_xml_parser_is_literal(text):
     """The parser recognises a closed tag set and leaves everything else alone,
@@ -163,6 +173,16 @@ def test_the_inner_span_wins_on_conflict():
     assert langs["b"] == "it"
 
 
+def test_glued_whitespace_keeps_source_text_in_step():
+    """Whitespace between tags is glued onto the previous run. When that run
+    was substituted, the recorded original has to grow by the same characters,
+    or the preview shows a change the author never made."""
+    p = plan('<sub alias="X">a</sub> <lang xml:lang="es">b</lang>')
+    run = next(n for n in p.nodes if isinstance(n, Speech) and n.source_text)
+    assert run.text.endswith(" ")
+    assert run.source_text == run.text.replace("X", "a")
+
+
 def test_a_substitution_does_not_leak_to_siblings():
     """<sub> applies to the words it wraps. Inheriting it would put unrelated
     text through a substitution the author never asked for -- the run merges
@@ -248,6 +268,9 @@ def test_each_unsupported_language_warns_once():
         engine_languages=["en"],
     )
     assert codes(p).count("language_unsupported") == 1
+    # The warning promises the default language; every run must honour it,
+    # not just the first one in that language.
+    assert all(n.language == "en" for n in p.nodes if isinstance(n, Speech))
 
 
 def test_a_tight_single_word_span_is_not_flagged():
@@ -322,6 +345,13 @@ def test_strip_markup_detects_a_rewritten_script():
     original = "The shot here is a bandeja."
     tampered = 'The shot here is a <lang xml:lang="es">bandeja</lang>, obviously.'
     assert strip_markup(tampered) != strip_markup(original)
+
+
+def test_strip_markup_leaves_tag_name_prefixes_alone():
+    """A word that merely starts with a tag name is prose, and prose must
+    survive stripping, or the rewritten-script check could not see it move."""
+    text = "<subject> <breaking> <language>"
+    assert strip_markup(text) == text
 
 
 def test_strip_markup_ignores_whitespace_reflow():
