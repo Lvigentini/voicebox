@@ -53,8 +53,14 @@ def test_base_qwen_does_not_support_instruct():
     assert engine_supports_instruct("qwen") is False
 
 
-def test_custom_voice_supports_instruct():
-    assert engine_supports_instruct("qwen_custom_voice") is True
+def test_custom_voice_resolves_conservatively():
+    """The 1.7B custom-voice checkpoint honours ``instruct`` but qwen_tts throws
+    it away for the 0.6B one (found by @hakimio on #1036), so the engine as a
+    whole must answer False: a request names the engine, not the size."""
+    configs = {c.model_name: c for c in get_tts_model_configs() if c.engine == "qwen_custom_voice"}
+    assert configs["qwen-custom-voice-1.7B"].supports_instruct is True
+    assert configs["qwen-custom-voice-0.6B"].supports_instruct is False
+    assert engine_supports_instruct("qwen_custom_voice") is False
 
 
 def test_unknown_engine_is_not_supported():
@@ -145,7 +151,7 @@ def test_warns_when_instruct_would_be_discarded(caplog):
 
 def test_no_warning_when_the_engine_honours_instruct(caplog):
     with caplog.at_level(logging.WARNING, logger="backend.routes.generations"):
-        _warn_if_instruct_ignored("speak angrily", "qwen_custom_voice")
+        _warn_if_instruct_ignored("speak angrily", "qwen_voice_design")
     assert not caplog.records
 
 
@@ -164,4 +170,4 @@ def test_warning_names_a_working_alternative(caplog):
     with caplog.at_level(logging.WARNING, logger="backend.routes.generations"):
         _warn_if_instruct_ignored("speak angrily", "qwen")
     rendered = caplog.records[0].getMessage()
-    assert "qwen_custom_voice" in rendered
+    assert "qwen_voice_design" in rendered
