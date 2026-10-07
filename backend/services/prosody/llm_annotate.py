@@ -25,6 +25,7 @@ hand-written markup, which is the whole feature minus the typing assistance.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -33,6 +34,9 @@ from .parser import ProsodyParseError, has_markup, parse, strip_markup
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_SIZE = "1.7B"
+# A stalled local model must not hold /prosody/annotate open forever. Generous,
+# because a cold 4B model on CPU can legitimately take a minute to answer.
+ANNOTATE_TIMEOUT_S = 120.0
 # Low, because this is a structural edit rather than a creative one: the same
 # script should get the same annotation.
 TEMPERATURE = 0.2
@@ -159,13 +163,25 @@ async def annotate_with_llm(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            raw = await backend.generate(
-                prompt=prompt,
-                system=SYSTEM_PROMPT,
-                max_tokens=min(2048, len(text) * 2 + 256),
-                temperature=TEMPERATURE,
+            raw = await asyncio.wait_for(
+                backend.generate(
+                    prompt=prompt,
+                    system=SYSTEM_PROMPT,
+                    max_tokens=min(2048, len(text) * 2 + 256),
+                    temperature=TEMPERATURE,
+                    model_size=model_size,
+                    examples=_EXAMPLES,
+                ),
+                timeout=ANNOTATE_TIMEOUT_S,
+            )
+        except TimeoutError:
+            logger.warning("LLM annotation timed out after %.0fs", ANNOTATE_TIMEOUT_S)
+            return AnnotationResult(
+                markup=text,
+                accepted=False,
+                rejected_reason=f"the LLM call timed out after {ANNOTATE_TIMEOUT_S:.0f}s",
                 model_size=model_size,
-                examples=_EXAMPLES,
+                attempts=attempt,
             )
         except Exception:
             logger.exception("LLM annotation call failed")
