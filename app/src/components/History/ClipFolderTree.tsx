@@ -183,7 +183,9 @@ export function ClipFolderTree({
               type="button"
               onClick={() => toggleCollapsed(kind, folder.id)}
               className="shrink-0 rounded p-0.5 hover:bg-accent/50"
-              aria-label={folder.name}
+              aria-label={t(collapsed ? 'folders.expand' : 'folders.collapse', {
+                name: folder.name,
+              })}
               aria-expanded={!collapsed}
             >
               <Chevron className="h-3 w-3 text-muted-foreground" />

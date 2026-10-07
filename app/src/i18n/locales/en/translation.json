@@ -467,6 +467,8 @@
     "rename": "Rename",
     "delete": "Delete folder",
     "actions": "Actions for folder {{name}}",
+    "expand": "Expand folder {{name}}",
+    "collapse": "Collapse folder {{name}}",
     "voice": {
       "label": "Voice folders"
     },
