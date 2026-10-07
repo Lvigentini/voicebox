@@ -31,6 +31,7 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from backend.app import app  # noqa: E402
 from backend.database import PronunciationEntry, get_db  # noqa: E402
+from backend.services.prosody import pipeline as pipeline_module  # noqa: E402
 from backend.services.prosody.pipeline import build_plan, generate_with_prosody  # noqa: E402
 
 SR = 24000
@@ -229,6 +230,24 @@ async def test_a_dictionary_language_entry_cuts_a_run(spy, db):
     )
     assert any(c["language"] == "es" for c in spy.calls)
 
+
+@pytest.mark.asyncio
+async def test_phoneme_entries_follow_the_engine_capability(spy, db, monkeypatch):
+    """The phoneme strategy only emits <phoneme> for an engine that reads IPA.
+    No current engine does, so the respelling is spoken; the capability is
+    resolved per engine rather than assumed off."""
+    add(db, "bandeja", "bandeha", strategy="phoneme", phonemes="banˈdexa")  # noqa: RUF001
+    await generate_with_prosody(
+        "He plays a bandeja.", generate_chunked_fn=spy, gen_kwargs={}, db=db, **BASE
+    )
+    assert spy.calls[0]["text"] == "He plays a bandeha."
+
+    monkeypatch.setattr(pipeline_module, "PHONEME_ENGINES", frozenset({BASE["engine"]}))
+    spy.calls.clear()
+    await generate_with_prosody(
+        "He plays a bandeja.", generate_chunked_fn=spy, gen_kwargs={}, db=db, **BASE
+    )
+    assert "banˈdexa" in spy.calls[0]["text"]  # noqa: RUF001
 
 @pytest.mark.asyncio
 async def test_no_dictionary_and_no_markup_needs_no_database_work(spy):

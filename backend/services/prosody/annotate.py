@@ -54,7 +54,7 @@ class TermRule:
         rules that do not primarily respell.
         """
         if self.strategy == LANGUAGE and self.spoken_language:
-            return f'<lang xml:lang="{self.spoken_language}">{matched}</lang>'
+            return f'<lang xml:lang="{_escape(self.spoken_language)}">{matched}</lang>'
         if self.strategy == PHONEME and self.phonemes and supports_phonemes:
             return f'<phoneme alphabet="ipa" ph="{_escape(self.phonemes)}">{matched}</phoneme>'
         if self.replacement.lower() == matched.lower():

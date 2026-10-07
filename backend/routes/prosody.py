@@ -21,7 +21,7 @@ from ..services.prosody.llm_annotate import (
     is_llm_available,
 )
 from ..services.prosody.parser import ProsodyParseError
-from ..services.prosody.pipeline import engine_capabilities
+from ..services.prosody.pipeline import engine_capabilities, engine_supports_phonemes
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,13 @@ async def preview_prosody(
     entries = pronunciation.get_entries(
         db, language=data.language, profile_id=data.profile_id
     )
-    annotated, applied_terms = annotate(data.text, rules_from_entries(entries))
+    # Resolved for the chosen engine, so the preview realises phoneme entries
+    # exactly the way generation will.
+    annotated, applied_terms = annotate(
+        data.text,
+        rules_from_entries(entries),
+        supports_phonemes=engine_supports_phonemes(data.engine),
+    )
 
     supports_instruct, languages = engine_capabilities(data.engine)
     try:

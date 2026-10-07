@@ -27,6 +27,17 @@ from .renderer import render
 
 logger = logging.getLogger(__name__)
 
+# Engines that read IPA inside <phoneme>. None of the current ones do -- they
+# all take plain text -- so the dictionary's phoneme strategy falls back to its
+# respelling everywhere today. Kept in one place so a future engine switches
+# it on here and both callers of annotate() pick it up.
+PHONEME_ENGINES: frozenset[str] = frozenset()
+
+
+def engine_supports_phonemes(engine: str) -> bool:
+    """Whether *engine* consumes <phoneme> markup rather than plain text."""
+    return engine in PHONEME_ENGINES
+
 
 def engine_capabilities(engine: str) -> tuple[bool, list[str] | None]:
     """What *engine* can honour, read from the model registry.
@@ -84,7 +95,11 @@ def build_plan(
 
         entries = get_entries(db, language=language, profile_id=profile_id)
         if entries:
-            markup, applied = annotate(text, rules_from_entries(entries))
+            markup, applied = annotate(
+                text,
+                rules_from_entries(entries),
+                supports_phonemes=engine_supports_phonemes(engine),
+            )
             if applied:
                 logger.info("Dictionary annotated %d term(s)", len(applied))
 
