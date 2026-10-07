@@ -100,9 +100,12 @@ async def run_generation(
         trim_fn = trim_tts_output if engine_needs_trim(engine) else None
         runaway_detector = has_tts_runaway if engine_retries_runaway(engine) else None
 
+        # A regenerate asks for a new variation, so no seed goes to either path:
+        # the single-shot call or the per-run seeds the plan derives from it.
+        effective_seed = seed if mode != "regenerate" else None
         gen_kwargs: dict = dict(
             language=language,
-            seed=seed if mode != "regenerate" else None,
+            seed=effective_seed,
             instruct=instruct,
             trim_fn=trim_fn,
             runaway_detector=runaway_detector,
@@ -131,7 +134,7 @@ async def run_generation(
             profile_id=profile_id,
             supports_instruct=supports_instruct,
             engine_languages=engine_langs,
-            seed=seed,
+            seed=effective_seed,
             enabled=prosody,
         )
 

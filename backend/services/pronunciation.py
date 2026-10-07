@@ -52,7 +52,9 @@ def get_entries(
         )
     else:
         q = q.filter(PronunciationEntry.profile_id.is_(None))
-    return q.all()
+    # Ordered here so the filtered list, the unfiltered list and the prosody
+    # pipeline all see entries in the same, stable order.
+    return q.order_by(PronunciationEntry.term).all()
 
 
 def _match_case(source: str, replacement: str) -> str:

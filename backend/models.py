@@ -231,7 +231,9 @@ class PronunciationPreviewRequest(BaseModel):
     """Request to see what the dictionary would do to a piece of text."""
 
     text: str = Field(..., min_length=1, max_length=50000)
-    language: Optional[str] = None
+    # Same language set as GenerationRequest: a preview must not describe a
+    # configuration that /generate would then refuse.
+    language: Optional[str] = Field(None, pattern="^(zh|en|ja|ko|de|fr|ru|pt|es|it|he|ar|da|el|fi|hi|ms|nl|no|pl|sv|sw|tr)$")
     profile_id: Optional[str] = None
 
 
@@ -255,7 +257,12 @@ class ProsodyPreviewRequest(BaseModel):
     """Ask what a script compiles to, without generating anything."""
 
     text: str = Field(..., min_length=1, max_length=50000)
-    engine: str = Field(default="qwen", max_length=50)
+    # Same engine set as GenerationRequest, so an unknown engine fails here
+    # instead of yielding a plan for something that cannot run.
+    engine: str = Field(
+        default="qwen",
+        pattern="^(qwen|qwen_custom_voice|qwen_voice_design|luxtts|chatterbox|chatterbox_turbo|tada|kokoro|omnivoice)$",
+    )
     language: str = Field(
         default="en", pattern="^(zh|en|ja|ko|de|fr|ru|pt|es|it|he|ar|da|el|fi|hi|ms|nl|no|pl|sv|sw|tr)$"
     )

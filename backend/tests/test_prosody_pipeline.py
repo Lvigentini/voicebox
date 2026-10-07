@@ -295,3 +295,80 @@ def test_generate_accepts_the_prosody_flag(client):
         client.post(f"/generate/{r.json()['id']}/cancel")
     finally:
         client.delete(f"/profiles/{profile['id']}")
+
+
+def test_previews_reject_what_generation_rejects(client):
+    """A preview exists to show what generation would do, so it must not
+    accept an engine or language that /generate refuses."""
+    assert client.post("/prosody/preview", json={"text": "x", "engine": "nope"}).status_code == 422
+    assert client.post("/pronunciations/preview", json={"text": "x", "language": "xx"}).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_regenerate_drops_the_seed_on_the_prosody_path(client, db, monkeypatch):
+    """A regenerate asks for a fresh take. The single-shot call already went
+    out with seed=None, but the plan path derived its per-run seeds from the
+    request's seed, so a marked-up script regenerated into the same audio."""
+    from backend.services import history as history_service
+    from backend.services.generation import run_generation
+
+    seen: list[int | None] = []
+
+    class FakeBackend:
+        def is_loaded(self):
+            return True
+
+    async def fake_generate_chunked(_model, text, _voice_prompt, **kwargs):
+        seen.append(kwargs.get("seed"))
+        return np.zeros(2400, dtype=np.float32), SR
+
+    async def fake_load(*_a, **_k):
+        return None
+
+    async def fake_voice_prompt(*_a, **_k):
+        return {}
+
+    monkeypatch.setattr("backend.backends.get_tts_backend_for_engine", lambda _e: FakeBackend())
+    monkeypatch.setattr("backend.backends.load_engine_model", fake_load)
+    monkeypatch.setattr("backend.utils.chunked_tts.generate_chunked", fake_generate_chunked)
+    monkeypatch.setattr("backend.services.profiles.create_voice_prompt_for_profile", fake_voice_prompt)
+
+    name = f"Prosody Seed Voice {uuid.uuid4().hex[:8]}"
+    profile = client.post("/profiles", json={"name": name, "language": "en"}).json()
+    text = 'One.<break time="700ms"/>Two.'
+    try:
+        generation = await history_service.create_generation(
+            profile_id=profile["id"],
+            text=text,
+            language="en",
+            audio_path="",
+            duration=0,
+            seed=42,
+            db=db,
+            status="generating",
+            engine="qwen",
+        )
+        common = dict(
+            generation_id=generation.id,
+            profile_id=profile["id"],
+            text=text,
+            language="en",
+            engine="qwen",
+            model_size="1.7B",
+            seed=42,
+        )
+
+        def status():
+            db.expire_all()
+            return client.get(f"/history/{generation.id}").json()["status"]
+
+        await run_generation(**common, mode="generate")
+        assert status() == "completed"
+        assert seen == [42, 43], "a seeded generate derives one seed per run"
+
+        seen.clear()
+        await run_generation(**common, mode="regenerate")
+        assert status() == "completed"
+        assert seen == [None, None], "a regenerate must not reuse the seed on any run"
+    finally:
+        client.delete(f"/profiles/{profile['id']}")
