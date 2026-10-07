@@ -292,3 +292,15 @@ def test_deleting_the_copy_leaves_the_originals_audio_intact(client, cloned_prof
     _delete(client, copy["id"])
 
     assert original_audio.exists()
+
+
+def test_whitespace_only_name_is_rejected(client, preset_profile):
+    """``ProfileDuplicateRequest.name`` strips before its length check, so a
+    blank override fails validation instead of persisting an empty name."""
+    before = {p["id"] for p in client.get("/profiles").json()}
+
+    r = client.post(f"/profiles/{preset_profile['id']}/duplicate", json={"name": "   "})
+
+    assert r.status_code == 422, r.text
+    assert {p["id"] for p in client.get("/profiles").json()} == before
+
