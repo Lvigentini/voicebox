@@ -9,17 +9,26 @@ to the repo instead of the app data dir.
 The variable is read at import time, so each test reloads the module under a
 patched environment.
 
-NOTE: These tests reload ``config``, which rebinds its module-global
+NOTE: These tests reload ``backend.config``, which rebinds its module-global
 ``_data_dir``. Import the module fresh rather than holding a reference across
 reloads.
+
+The module is imported through the ``backend`` package, the same identity the
+rest of the suite uses (``from backend import config``). Importing a second
+copy as top-level ``config`` would leave ``backend.config`` untouched by the
+reloads here and stale for every later test.
 """
 
 import importlib
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
-from backend import config
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from backend import config  # noqa: E402
 
 
 @pytest.fixture
@@ -34,11 +43,10 @@ def reload_config(monkeypatch):
         return importlib.reload(config)
 
     yield _reload
-    # Undo before the reload, not after: pytest restores monkeypatch once the
-    # fixture has finished, so reloading first would bake the last test's
-    # VOICEBOX_DATA_DIR into the module for everything that follows.
-    monkeypatch.undo()
     # Leave the module matching the real process environment for later tests.
+    # monkeypatch tears down after this fixture, so undo its patches explicitly
+    # first; otherwise the reload below still sees the temporary path.
+    monkeypatch.undo()
     importlib.reload(config)
 
 
@@ -77,3 +85,16 @@ def test_set_data_dir_still_wins_over_env_var(reload_config, tmp_path):
     cfg.set_data_dir(explicit)
 
     assert cfg.get_data_dir() == explicit.resolve()
+
+
+def test_fixture_leaves_config_matching_process_env():
+    """Runs after the fixture-based tests above, without the fixture.
+
+    The fixture's final reload must happen *after* the environment is
+    restored; otherwise ``backend.config`` keeps a temporary ``from-env`` path
+    and every later test module inherits a deleted directory.
+    """
+    env = os.environ.get("VOICEBOX_DATA_DIR")
+    expected = Path(env).resolve() if env else Path("data").resolve()
+
+    assert config.get_data_dir() == expected

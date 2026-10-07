@@ -457,8 +457,9 @@ export interface HealthResponse {
   supports_rocm?: boolean; // AMD GPU on Windows or Linux (/dev/kfd) — the ROCm backend is applicable
   cloud_enabled?: boolean; // VOICEBOX_CLOUD_ENABLED on the backend — show the Cloud section
   /**
-   * ffmpeg is optional. Without it, loudness normalisation is unavailable and
-   * m4a/aac/webm cannot be imported — libsndfile cannot open those.
+   * ffmpeg is optional. Without it, loudness normalisation and m4b export are
+   * unavailable, story mp3 exports carry no chapters, and m4a/aac/webm cannot
+   * be imported — libsndfile cannot open those.
    */
   ffmpeg_available?: boolean;
 }
@@ -593,7 +594,8 @@ export type GenerationExportFormat = 'wav' | 'mp3';
 /**
  * Story export containers. wav/flac/ogg/opus come from the bundled libsndfile;
  * mp3 and m4b are transcoded by ffmpeg and are the only ones that can carry
- * chapter markers.
+ * chapter markers. Without ffmpeg, mp3 falls back to libsndfile (no chapters)
+ * and m4b is unavailable.
  */
 export type StoryExportFormat = 'wav' | 'flac' | 'ogg' | 'opus' | 'mp3' | 'm4b';
 

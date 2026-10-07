@@ -644,7 +644,7 @@
       "ogg": "오디오 (OGG Vorbis)",
       "opus": "오디오 (Opus)",
       "mp3": "오디오 (MP3)",
-      "m4b": "오디오북 (M4B, 챕터 포함)"
+      "m4b": "오디오북 (M4B, 챕터 포함)",      "m4bUnavailable": "오디오북(M4B)에는 ffmpeg가 필요합니다"
     },
     "empty": {
       "title": "이 스토리에 항목이 없습니다",

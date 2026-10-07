@@ -287,10 +287,13 @@ async def export_story_audio(
     Query params:
         format: ``wav`` (default), ``flac``, ``ogg`` and ``opus`` come straight
             from the bundled libsndfile, no ffmpeg. ``mp3`` and ``m4b`` are
-            transcoded by ffmpeg and answer 503 when it is not installed.
+            transcoded by ffmpeg when it is installed. Without it, ``mp3``
+            still succeeds through libsndfile but carries no chapters, and
+            ``m4b`` answers 503 with an install hint.
         chapters: ``none`` (default) or ``auto``. ``auto`` emits one chapter
             per story item, titled from its generation text. Only mp3 and m4b
-            can carry chapters; the other containers ignore this.
+            can carry chapters; the other containers ignore this, as does an
+            mp3 written without ffmpeg.
         normalize_loudness: apply EBU R128 loudness normalisation. Needs
             ffmpeg, but is a no-op without it rather than an error — the
             export still succeeds with the mixer's own peak normalisation.

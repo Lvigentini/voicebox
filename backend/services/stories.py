@@ -17,6 +17,7 @@ from sqlalchemy import func
 
 from .. import config
 from ..utils.ffmpeg import encode_audio as ffmpeg_encode_audio
+from ..utils.ffmpeg import is_available as ffmpeg_is_available
 from ..models import (
     StoryCreate,
     StoryResponse,
@@ -55,8 +56,9 @@ MAX_PROJECT_SAMPLE_RATE = 48000
 FALLBACK_SAMPLE_RATE = 24000
 
 # Containers transcoded by ffmpeg from a temporary WAV of the mix. These are
-# the only ones that can carry chapter markers, and the only ones that need
-# ffmpeg at all.
+# the only ones that can carry chapter markers. m4b needs ffmpeg outright;
+# mp3 is also in ``EXPORT_FORMATS``, so when ffmpeg is missing it falls back
+# to libsndfile's LAME encoder and simply ships without chapters.
 FFMPEG_EXPORT_FORMATS: dict[str, dict[str, str]] = {
     "mp3": {"mime": "audio/mpeg", "ext": ".mp3"},
     "m4b": {"mime": "audio/mp4", "ext": ".m4b"},
@@ -1285,11 +1287,14 @@ async def export_story_audio(
         story_id: Story ID
         db: Database session
         fmt: Output container; a key of :data:`STORY_EXPORT_FORMATS`. wav,
-            flac, ogg and opus come straight from libsndfile; mp3 and m4b go
-            through ffmpeg and raise ``RuntimeError`` when it is missing.
+            flac, ogg and opus come straight from libsndfile. mp3 and m4b go
+            through ffmpeg, which is what embeds the chapter markers; without
+            ffmpeg, mp3 falls back to libsndfile (no chapters) while m4b
+            raises ``RuntimeError``.
         chapters_mode: "none" (default) leaves chapter metadata off; "auto"
             derives one chapter per story item, titled from its generation
-            text. Only mp3 and m4b can carry chapters; the rest ignore this.
+            text. Only mp3 and m4b can carry chapters; the rest ignore this,
+            and so does an mp3 written without ffmpeg.
 
     Returns:
         Audio file bytes or None if story not found
@@ -1455,6 +1460,18 @@ async def export_story_audio(
 
     fmt = (fmt or "wav").lower()
     if fmt not in FFMPEG_EXPORT_FORMATS:
+        return encode_audio(final_audio, project_sr, fmt)
+
+    if fmt in EXPORT_FORMATS and not ffmpeg_is_available():
+        # libsndfile can write this container on its own (mp3 via LAME); only
+        # the chapter markers need ffmpeg. Degrade the way normalize_loudness
+        # does rather than refuse the most common export format outright.
+        if chapters_mode == "auto":
+            logger.warning(
+                "ffmpeg not found: exporting story %s as %s without chapter markers",
+                story_id,
+                fmt,
+            )
         return encode_audio(final_audio, project_sr, fmt)
 
     chapters: Optional[List[_Chapter]] = None

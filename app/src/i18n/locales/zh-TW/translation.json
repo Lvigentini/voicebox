@@ -644,7 +644,7 @@
       "ogg": "音訊 (OGG Vorbis)",
       "opus": "音訊 (Opus)",
       "mp3": "音訊 (MP3)",
-      "m4b": "有聲書 (M4B，含章節)"
+      "m4b": "有聲書 (M4B，含章節)",      "m4bUnavailable": "有聲書（M4B）需要 ffmpeg"
     },
     "empty": {
       "title": "此故事尚無項目",

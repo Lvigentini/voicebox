@@ -58,7 +58,9 @@ import { SortableStoryChatItem } from './StoryChatItem';
 
 /**
  * Export containers in menu order. wav/flac/ogg/opus come from the bundled
- * libsndfile; mp3 and m4b are transcoded by ffmpeg and carry chapter markers.
+ * libsndfile. mp3 and m4b are transcoded by ffmpeg, which is what embeds the
+ * chapter markers; without ffmpeg the backend still writes mp3 through
+ * libsndfile (no chapters), but m4b is unavailable.
  */
 const EXPORT_FORMATS: { value: StoryExportFormat; icon: LucideIcon }[] = [
   { value: 'wav', icon: FileAudio },
@@ -494,19 +496,29 @@ export function StoryContent() {
                   {t('storyContent.exportDropdownLabel')}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {EXPORT_FORMATS.map(({ value, icon: Icon }) => (
-                  <DropdownMenuItem key={value} onClick={() => handleExportAudio(value)}>
-                    <Icon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                    {t(`storyContent.exportFormats.${value}`)}
-                  </DropdownMenuItem>
-                ))}
+                {EXPORT_FORMATS.map(({ value, icon: Icon }) => {
+                  // Only the m4b container has no libsndfile fallback.
+                  const needsFfmpeg = value === 'm4b' && !health?.ffmpeg_available;
+                  return (
+                    <DropdownMenuItem
+                      key={value}
+                      disabled={needsFfmpeg}
+                      onClick={() => handleExportAudio(value)}
+                    >
+                      <Icon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                      {needsFfmpeg
+                        ? t('storyContent.exportFormats.m4bUnavailable')
+                        : t(`storyContent.exportFormats.${value}`)}
+                    </DropdownMenuItem>
+                  );
+                })}
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                   {t('storyContent.export.mastering')}
                 </DropdownMenuLabel>
                 <DropdownMenuItem
-                  // Loudness normalisation needs ffmpeg, as does MP3 itself;
-                  // disable rather than silently ignoring the request.
+                  // Loudness normalisation needs ffmpeg (the mp3 itself no
+                  // longer does); disable rather than silently ignoring it.
                   disabled={!health?.ffmpeg_available}
                   onClick={() => handleExportAudio('mp3', true)}
                 >

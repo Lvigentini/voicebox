@@ -97,14 +97,27 @@ def test_export_succeeds_without_ffmpeg(client, story_with_audio, no_ffmpeg):
         assert len(r.content) > 0
 
 
-def test_ffmpeg_formats_are_503_with_install_hint(client, story_with_audio, no_ffmpeg):
-    """mp3 and m4b are transcoded by ffmpeg; without it the answer is actionable."""
-    for fmt in ("mp3", "m4b"):
-        r = client.get(
-            f"/stories/{story_with_audio['id']}/export-audio", params={"format": fmt}
-        )
-        assert r.status_code == 503, f"{fmt}: {r.status_code} {r.text}"
-        assert "ffmpeg" in r.json()["detail"]
+def test_m4b_is_503_with_install_hint(client, story_with_audio, no_ffmpeg):
+    """Only ffmpeg can write the m4b container; without it the answer is actionable."""
+    r = client.get(
+        f"/stories/{story_with_audio['id']}/export-audio", params={"format": "m4b"}
+    )
+    assert r.status_code == 503, f"{r.status_code} {r.text}"
+    assert "ffmpeg" in r.json()["detail"]
+
+
+def test_mp3_falls_back_to_libsndfile_without_ffmpeg(client, story_with_audio, no_ffmpeg):
+    """mp3 needs ffmpeg only for chapter markers; libsndfile's LAME writes the rest."""
+    r = client.get(
+        f"/stories/{story_with_audio['id']}/export-audio",
+        params={"format": "mp3", "chapters": "auto"},
+    )
+    assert r.status_code == 200, f"{r.status_code} {r.text}"
+    assert r.headers["content-type"].startswith("audio/mpeg")
+    assert r.content[:3] == b"ID3" or r.content[0] == 0xFF
+    data, sr = sf.read(io.BytesIO(r.content), dtype="float32", always_2d=True)
+    assert sr == 48000
+    assert np.abs(data).max() > 0
 
 
 def test_loudness_request_degrades_rather_than_failing(client, story_with_audio, no_ffmpeg):

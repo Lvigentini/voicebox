@@ -2081,11 +2081,18 @@ export function StoryTrackEditor({ storyId, items }: StoryTrackEditorProps) {
               onClick={() => {
                 const rate = Number.parseFloat(speedDraft);
                 if (lengthTargetId && rate >= 0.25 && rate <= 4) {
-                  updateSpeed.mutate({
-                    storyId,
-                    itemId: lengthTargetId,
-                    data: { speed: rate },
-                  });
+                  updateSpeed.mutate(
+                    { storyId, itemId: lengthTargetId, data: { speed: rate } },
+                    {
+                      onError: (error) => {
+                        toast({
+                          title: 'Failed to update speed',
+                          description: error instanceof Error ? error.message : String(error),
+                          variant: 'destructive',
+                        });
+                      },
+                    },
+                  );
                 }
                 setLengthTargetId(null);
               }}

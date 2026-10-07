@@ -644,7 +644,7 @@
       "ogg": "音频 (OGG Vorbis)",
       "opus": "音频 (Opus)",
       "mp3": "音频 (MP3)",
-      "m4b": "有声书 (M4B，含章节)"
+      "m4b": "有声书 (M4B，含章节)",      "m4bUnavailable": "有声书（M4B）需要 ffmpeg"
     },
     "empty": {
       "title": "此故事暂无项目",

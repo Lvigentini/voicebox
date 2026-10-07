@@ -1060,10 +1060,10 @@ class ApiClient {
 
   /**
    * Mix a story down to one file. `format` defaults to wav. `chapters` only
-   * applies to mp3/m4b, which need ffmpeg and fail with a 503 without it;
-   * it defaults to `auto` for those. `normalizeLoudness` also needs ffmpeg
-   * but is silently skipped without it — check `ffmpeg_available` on /health
-   * before offering it.
+   * applies to mp3/m4b and defaults to `auto` for those; embedding them needs
+   * ffmpeg. Without ffmpeg, m4b fails with a 503, mp3 still succeeds but
+   * carries no chapters, and `normalizeLoudness` is silently skipped — check
+   * `ffmpeg_available` on /health before offering those.
    */
   async exportStoryAudio(
     storyId: string,
