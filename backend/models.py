@@ -22,6 +22,13 @@ TrimmedName = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
 ]
 
+# Names arrive from text inputs, so a value of "   " passes a raw
+# min_length check and then stores as an empty label once stripped.
+# Strip first, then length-check the result.
+TrimmedName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
+]
+
 
 class FolderCreate(BaseModel):
     """Request model for creating a folder."""
