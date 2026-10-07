@@ -15,6 +15,7 @@ reloads.
 """
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -38,6 +39,9 @@ def reload_config(monkeypatch):
 
     yield _reload
     # Leave the module matching the real process environment for later tests.
+    # monkeypatch tears down after this fixture, so undo its patches explicitly
+    # first; otherwise the reload below still sees the temporary path.
+    monkeypatch.undo()
     importlib.reload(config)
 
 
@@ -76,3 +80,16 @@ def test_set_data_dir_still_wins_over_env_var(reload_config, tmp_path):
     cfg.set_data_dir(explicit)
 
     assert cfg.get_data_dir() == explicit.resolve()
+
+
+def test_fixture_leaves_config_matching_process_env():
+    """Runs after the fixture-based tests above, without the fixture.
+
+    The fixture's final reload must happen *after* the environment is
+    restored; otherwise ``config`` keeps a temporary ``from-env`` path and
+    every later test module inherits a deleted directory.
+    """
+    env = os.environ.get("VOICEBOX_DATA_DIR")
+    expected = Path(env).resolve() if env else Path("data").resolve()
+
+    assert config.get_data_dir() == expected
