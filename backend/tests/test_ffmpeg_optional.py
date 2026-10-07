@@ -41,7 +41,8 @@ def client():
 def no_ffmpeg(monkeypatch):
     """Pretend ffmpeg is not installed, however this machine is set up."""
     ffmpeg.reset_cache()
-    monkeypatch.setattr(ffmpeg.shutil, "which", lambda _name: None)
+    monkeypatch.delenv("VOICEBOX_FFMPEG_DIR", raising=False)
+    monkeypatch.setattr(ffmpeg.shutil, "which", lambda *_args, **_kwargs: None)
     ffmpeg.reset_cache()
     yield
     ffmpeg.reset_cache()
@@ -87,13 +88,23 @@ def test_is_available_false_without_binary(no_ffmpeg):
 
 
 def test_export_succeeds_without_ffmpeg(client, story_with_audio, no_ffmpeg):
-    """The mixdown and all containers come from libsndfile, not ffmpeg."""
-    for fmt in ("wav", "mp3", "ogg", "flac"):
+    """The mixdown and the libsndfile containers never touch ffmpeg."""
+    for fmt in ("wav", "flac", "ogg", "opus"):
         r = client.get(
             f"/stories/{story_with_audio['id']}/export-audio", params={"format": fmt}
         )
         assert r.status_code == 200, f"{fmt} failed without ffmpeg: {r.text}"
         assert len(r.content) > 0
+
+
+def test_ffmpeg_formats_are_503_with_install_hint(client, story_with_audio, no_ffmpeg):
+    """mp3 and m4b are transcoded by ffmpeg; without it the answer is actionable."""
+    for fmt in ("mp3", "m4b"):
+        r = client.get(
+            f"/stories/{story_with_audio['id']}/export-audio", params={"format": fmt}
+        )
+        assert r.status_code == 503, f"{fmt}: {r.status_code} {r.text}"
+        assert "ffmpeg" in r.json()["detail"]
 
 
 def test_loudness_request_degrades_rather_than_failing(client, story_with_audio, no_ffmpeg):

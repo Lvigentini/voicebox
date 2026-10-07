@@ -2,16 +2,15 @@
 
 import io
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import database, models
 from ..services import stories
-from ..app import safe_content_disposition
+from ..utils.http import safe_content_disposition
 from ..database import get_db
 from ..utils import ffmpeg
-from ..utils.audio import EXPORT_FORMATS
 
 router = APIRouter()
 
@@ -275,32 +274,51 @@ async def set_story_item_version(
 @router.get("/stories/{story_id}/export-audio")
 async def export_story_audio(
     story_id: str,
-    format: str = "wav",
+    # ``format_`` shadows the builtin ``format`` if exposed directly (Ruff
+    # A002), so the local identifier is renamed while the public query-param
+    # name stays ``format`` via the Query alias.
+    format_: str = Query("wav", alias="format"),
+    chapters: str = "none",
     normalize_loudness: bool = False,
     db: Session = Depends(get_db),
 ):
     """Export story as a single mixed audio file.
 
-    ``format`` defaults to wav so existing callers are unaffected; every
-    supported container is handled by the bundled libsndfile, no ffmpeg.
-
-    ``normalize_loudness`` applies EBU R128 normalisation and needs ffmpeg. It
-    is a no-op when ffmpeg is absent rather than an error — the export still
-    succeeds with the mixer's own peak normalisation.
+    Query params:
+        format: ``wav`` (default), ``flac``, ``ogg`` and ``opus`` come straight
+            from the bundled libsndfile, no ffmpeg. ``mp3`` and ``m4b`` are
+            transcoded by ffmpeg and answer 503 when it is not installed.
+        chapters: ``none`` (default) or ``auto``. ``auto`` emits one chapter
+            per story item, titled from its generation text. Only mp3 and m4b
+            can carry chapters; the other containers ignore this.
+        normalize_loudness: apply EBU R128 loudness normalisation. Needs
+            ffmpeg, but is a no-op without it rather than an error — the
+            export still succeeds with the mixer's own peak normalisation.
     """
-    spec = EXPORT_FORMATS.get(format.lower())
+    fmt = (format_ or "wav").lower()
+    spec = stories.STORY_EXPORT_FORMATS.get(fmt)
     if spec is None:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported export format '{format}'. Supported: {sorted(EXPORT_FORMATS)}",
+            detail=f"Unsupported export format '{format_}'. Supported: {sorted(stories.STORY_EXPORT_FORMATS)}",
         )
+    chapters_mode = (chapters or "none").lower()
+    if chapters_mode not in ("none", "auto"):
+        raise HTTPException(status_code=400, detail=f"Unsupported chapters mode: {chapters}")
 
     try:
         story = db.query(database.Story).filter_by(id=story_id).first()
         if not story:
             raise HTTPException(status_code=404, detail="Story not found")
 
-        audio_bytes = await stories.export_story_audio(story_id, db, fmt=format.lower())
+        try:
+            audio_bytes = await stories.export_story_audio(
+                story_id, db, fmt=fmt, chapters_mode=chapters_mode
+            )
+        except RuntimeError as e:
+            # Most likely: ffmpeg missing, timed out, or returned non-zero.
+            raise HTTPException(status_code=503, detail=str(e)) from e
+
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="Story has no audio items")
 

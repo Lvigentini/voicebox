@@ -15,7 +15,16 @@ import {
 } from '@dnd-kit/sortable';
 import { Link } from '@tanstack/react-router';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Download, Music, Plus, Upload } from 'lucide-react';
+import {
+  BookAudio,
+  ChevronDown,
+  Download,
+  FileAudio,
+  type LucideIcon,
+  Music,
+  Plus,
+  Upload,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Loader from 'react-loaders';
@@ -32,7 +41,7 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useToast } from '@/components/ui/use-toast';
 import { apiClient } from '@/lib/api/client';
-import type { ExportAudioFormat } from '@/lib/api/types';
+import type { StoryExportFormat } from '@/lib/api/types';
 import { useHistory } from '@/lib/hooks/useHistory';
 import { useServerHealth } from '@/lib/hooks/useServer';
 import {
@@ -47,13 +56,17 @@ import { useGenerationStore } from '@/stores/generationStore';
 import { useStoryStore } from '@/stores/storyStore';
 import { SortableStoryChatItem } from './StoryChatItem';
 
-/** Containers the bundled libsndfile writes; none of them need ffmpeg. */
-const EXPORT_FORMATS: { value: ExportAudioFormat; label: string }[] = [
-  { value: 'wav', label: 'WAV — lossless' },
-  { value: 'mp3', label: 'MP3 — widely compatible' },
-  { value: 'ogg', label: 'OGG Vorbis' },
-  { value: 'opus', label: 'Opus — smallest' },
-  { value: 'flac', label: 'FLAC — lossless, compressed' },
+/**
+ * Export containers in menu order. wav/flac/ogg/opus come from the bundled
+ * libsndfile; mp3 and m4b are transcoded by ffmpeg and carry chapter markers.
+ */
+const EXPORT_FORMATS: { value: StoryExportFormat; icon: LucideIcon }[] = [
+  { value: 'wav', icon: FileAudio },
+  { value: 'flac', icon: FileAudio },
+  { value: 'ogg', icon: FileAudio },
+  { value: 'opus', icon: FileAudio },
+  { value: 'mp3', icon: FileAudio },
+  { value: 'm4b', icon: BookAudio },
 ];
 
 export function StoryContent() {
@@ -233,7 +246,7 @@ export function StoryContent() {
     );
   };
 
-  const handleExportAudio = (format: ExportAudioFormat = 'wav', normalizeLoudness = false) => {
+  const handleExportAudio = (format: StoryExportFormat = 'wav', normalizeLoudness = false) => {
     if (!story) return;
 
     exportAudio.mutate(
@@ -473,24 +486,31 @@ export function StoryContent() {
                 <Button variant="outline" size="sm" disabled={exportAudio.isPending}>
                   <Download className="mr-2 h-4 w-4" />
                   {t('storyContent.exportAudio')}
+                  <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-70" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>{t('storyContent.export.format')}</DropdownMenuLabel>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  {t('storyContent.exportDropdownLabel')}
+                </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {EXPORT_FORMATS.map(({ value, label }) => (
+                {EXPORT_FORMATS.map(({ value, icon: Icon }) => (
                   <DropdownMenuItem key={value} onClick={() => handleExportAudio(value)}>
-                    {label}
+                    <Icon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    {t(`storyContent.exportFormats.${value}`)}
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t('storyContent.export.mastering')}</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  {t('storyContent.export.mastering')}
+                </DropdownMenuLabel>
                 <DropdownMenuItem
-                  // Loudness normalisation is the one export option that needs
-                  // ffmpeg; disable rather than silently ignoring the request.
+                  // Loudness normalisation needs ffmpeg, as does MP3 itself;
+                  // disable rather than silently ignoring the request.
                   disabled={!health?.ffmpeg_available}
                   onClick={() => handleExportAudio('mp3', true)}
                 >
+                  <FileAudio className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
                   {health?.ffmpeg_available
                     ? t('storyContent.export.normalized')
                     : t('storyContent.export.normalizedUnavailable')}

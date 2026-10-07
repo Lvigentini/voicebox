@@ -104,11 +104,13 @@ export interface GenerationRequest {
   engine?:
     | 'qwen'
     | 'qwen_custom_voice'
+    | 'qwen_voice_design'
     | 'luxtts'
     | 'chatterbox'
     | 'chatterbox_turbo'
     | 'tada'
-    | 'kokoro';
+    | 'kokoro'
+    | 'omnivoice';
   instruct?: string;
   /** When true and the profile has a personality prompt, input text is rewritten in-character before TTS. */
   personality?: boolean;
@@ -258,9 +260,30 @@ export interface CaptureSettings {
   chord_push_to_talk_keys: string[];
   /** keytap key names. Toggle adds Space to the platform-specific PTT chord. */
   chord_toggle_to_talk_keys: string[];
+  /**
+   * Optional OpenAI-compatible endpoint that overrides the built-in Qwen3
+   * LLM for refinement / personality rewriting. When set, backend calls hit
+   * `POST {custom_llm_endpoint}/chat/completions` with the model named by
+   * ``custom_llm_model``; leaving it null keeps the on-device Qwen path.
+   */
+  custom_llm_endpoint: string | null;
+  custom_llm_model: string | null;
+  /**
+   * Whether a custom LLM API key is currently stored on the server. The raw
+   * key value never rides the response — this flag replaces it — so the
+   * settings UI can show a "Configured" indicator without letting the
+   * frontend rehydrate the secret into state or leak it to a browser cache.
+   * Writes still go through ``CaptureSettingsUpdate.custom_llm_api_key``.
+   */
+  custom_llm_api_key_configured: boolean;
 }
 
-export type CaptureSettingsUpdate = Partial<CaptureSettings>;
+export type CaptureSettingsUpdate = Partial<
+  Omit<CaptureSettings, 'custom_llm_api_key_configured'>
+> & {
+  /** Write-only: setting this to a non-empty string stores it, ``null`` clears it. */
+  custom_llm_api_key?: string | null;
+};
 
 /**
  * One row in the dictation readiness checklist. ``model_name`` is the
@@ -311,7 +334,8 @@ export interface HealthResponse {
   vram_used_mb?: number;
   backend_type?: string;
   backend_variant?: string; // "cpu", "cuda", or "rocm"
-  supports_rocm?: boolean; // AMD GPU on Windows — the ROCm backend is applicable
+  supports_rocm?: boolean; // AMD GPU on Windows or Linux (/dev/kfd) — the ROCm backend is applicable
+  cloud_enabled?: boolean; // VOICEBOX_CLOUD_ENABLED on the backend — show the Cloud section
   /**
    * ffmpeg is optional. Without it, loudness normalisation is unavailable and
    * m4a/aac/webm cannot be imported — libsndfile cannot open those.
@@ -445,6 +469,14 @@ export interface StoryResponse {
   item_count: number;
 }
 
+export type GenerationExportFormat = 'wav' | 'mp3';
+/**
+ * Story export containers. wav/flac/ogg/opus come from the bundled libsndfile;
+ * mp3 and m4b are transcoded by ffmpeg and are the only ones that can carry
+ * chapter markers.
+ */
+export type StoryExportFormat = 'wav' | 'flac' | 'ogg' | 'opus' | 'mp3' | 'm4b';
+
 export interface StoryItemDetail {
   id: string;
   story_id: string;
@@ -486,9 +518,6 @@ export interface StoryItemFadeUpdate {
 export interface StoryItemSpeedUpdate {
   speed: number;
 }
-
-/** Containers the bundled libsndfile can write — none of them need ffmpeg. */
-export type ExportAudioFormat = 'wav' | 'mp3' | 'ogg' | 'opus' | 'flac';
 
 /**
  * Mixer settings for one timeline lane. A lane with no entry mixes at unity

@@ -12,6 +12,7 @@ import type {
   FolderKind,
   FolderResponse,
   FolderUpdate,
+  GenerationExportFormat,
   GenerationRequest,
   GenerationResponse,
   GenerationVersionResponse,
@@ -27,9 +28,9 @@ import type {
   RocmStatus,
   StoryCreate,
   StoryDetailResponse,
-  ExportAudioFormat,
   StoryItemBatchUpdate,
   StoryItemCreate,
+  StoryExportFormat,
   StoryItemDetail,
   StoryItemFadeUpdate,
   StoryItemMove,
@@ -434,8 +435,11 @@ class ApiClient {
     return response.blob();
   }
 
-  async exportGenerationAudio(generationId: string): Promise<Blob> {
-    const url = `${this.getBaseUrl()}/history/${generationId}/export-audio`;
+  async exportGenerationAudio(
+    generationId: string,
+    format: GenerationExportFormat = 'wav',
+  ): Promise<Blob> {
+    const url = `${this.getBaseUrl()}/history/${generationId}/export-audio?format=${format}`;
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -973,20 +977,27 @@ class ApiClient {
   }
 
   /**
-   * Mix a story down to one file. `format` defaults to wav server-side.
-   * `normalizeLoudness` needs ffmpeg and is silently skipped without it —
-   * check `ffmpeg_available` on /health before offering it.
+   * Mix a story down to one file. `format` defaults to wav. `chapters` only
+   * applies to mp3/m4b, which need ffmpeg and fail with a 503 without it;
+   * it defaults to `auto` for those. `normalizeLoudness` also needs ffmpeg
+   * but is silently skipped without it — check `ffmpeg_available` on /health
+   * before offering it.
    */
   async exportStoryAudio(
     storyId: string,
-    options?: { format?: ExportAudioFormat; normalizeLoudness?: boolean },
+    options?: {
+      format?: StoryExportFormat;
+      chapters?: 'none' | 'auto';
+      normalizeLoudness?: boolean;
+    },
   ): Promise<Blob> {
-    const params = new URLSearchParams();
-    if (options?.format) params.append('format', options.format);
-    if (options?.normalizeLoudness) params.append('normalize_loudness', 'true');
-
-    const query = params.toString();
-    const url = `${this.getBaseUrl()}/stories/${storyId}/export-audio${query ? `?${query}` : ''}`;
+    const format = options?.format ?? 'wav';
+    const chapters =
+      options?.chapters ?? (format === 'mp3' || format === 'm4b' ? 'auto' : 'none');
+    const params = new URLSearchParams({ format });
+    if (chapters !== 'none') params.set('chapters', chapters);
+    if (options?.normalizeLoudness) params.set('normalize_loudness', 'true');
+    const url = `${this.getBaseUrl()}/stories/${storyId}/export-audio?${params}`;
     const response = await fetch(url);
 
     if (!response.ok) {

@@ -2,14 +2,21 @@
 Story management module.
 """
 
+from pathlib import Path
 from typing import List, Optional
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
+import asyncio
 import logging
+import os
+import re
+import tempfile
 import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from .. import config
+from ..utils.ffmpeg import encode_audio as ffmpeg_encode_audio
 from ..models import (
     StoryCreate,
     StoryResponse,
@@ -35,7 +42,7 @@ from ..database import (
 )
 from ..database.models import StoryTrack as DBStoryTrack
 from .history import _get_versions_for_generation
-from ..utils.audio import encode_audio, time_stretch_speech
+from ..utils.audio import EXPORT_FORMATS, encode_audio, time_stretch_speech
 import librosa
 import numpy as np
 
@@ -46,6 +53,25 @@ MAX_PROJECT_SAMPLE_RATE = 48000
 
 # Used when a story's sources give us nothing to go on (all unreadable).
 FALLBACK_SAMPLE_RATE = 24000
+
+# Containers transcoded by ffmpeg from a temporary WAV of the mix. These are
+# the only ones that can carry chapter markers, and the only ones that need
+# ffmpeg at all.
+FFMPEG_EXPORT_FORMATS: dict[str, dict[str, str]] = {
+    "mp3": {"mime": "audio/mpeg", "ext": ".mp3"},
+    "m4b": {"mime": "audio/mp4", "ext": ".m4b"},
+}
+
+# Everything /stories/{id}/export-audio can produce. The rest come straight
+# from libsndfile via ``utils.audio.encode_audio``, no ffmpeg involved.
+STORY_EXPORT_FORMATS: dict[str, dict[str, str]] = {
+    **{
+        key: {"mime": spec["mime"], "ext": spec["ext"]}
+        for key, spec in EXPORT_FORMATS.items()
+        if key not in FFMPEG_EXPORT_FORMATS
+    },
+    **FFMPEG_EXPORT_FORMATS,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +140,8 @@ async def create_story(
         id=str(uuid.uuid4()),
         name=data.name,
         description=data.description,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
     db.add(db_story)
@@ -224,7 +250,7 @@ async def update_story(
 
     story.name = data.name
     story.description = data.description
-    story.updated_at = datetime.utcnow()
+    story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(story)
@@ -349,13 +375,13 @@ async def add_item_to_story(
         generation_id=data.generation_id,
         start_time_ms=start_time_ms,
         track=track,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
 
     db.add(item)
 
     # Update story updated_at
-    story.updated_at = datetime.utcnow()
+    story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(item)
@@ -408,7 +434,7 @@ async def move_story_item(
     # Update story updated_at
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(item)
@@ -452,7 +478,7 @@ async def remove_item_from_story(
     # Update story updated_at
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     return True
@@ -505,7 +531,7 @@ async def trim_story_item(
     # Update story updated_at
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(item)
@@ -538,7 +564,7 @@ async def update_story_item_volume(
 
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(item)
@@ -584,7 +610,7 @@ async def _update_story_item_fields(
 
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(item)
@@ -658,9 +684,9 @@ async def upsert_story_track(
     row.muted = data.muted
     row.soloed = data.soloed
     row.duck_under_track = data.duck_under_track
-    row.updated_at = datetime.utcnow()
+    row.updated_at = datetime.now(UTC)
 
-    story.updated_at = datetime.utcnow()
+    story.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(row)
     return StoryTrackResponse.model_validate(row)
@@ -753,7 +779,7 @@ async def split_story_item(
         fade_in_ms=0,
         fade_out_ms=tail_fade_out,
         speed=getattr(item, "speed", 1.0) or 1.0,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
 
     db.add(new_item)
@@ -761,7 +787,7 @@ async def split_story_item(
     # Update story updated_at
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(item)
@@ -827,7 +853,7 @@ async def duplicate_story_item(
         trim_start_ms=current_trim_start,
         trim_end_ms=current_trim_end,
         volume=getattr(original_item, "volume", 1.0),
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
 
     db.add(new_item)
@@ -835,7 +861,7 @@ async def duplicate_story_item(
     # Update story updated_at
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(new_item)
@@ -877,7 +903,7 @@ async def update_story_item_times(
         item_map[update.generation_id].start_time_ms = update.start_time_ms
 
     # Update story updated_at
-    story.updated_at = datetime.utcnow()
+    story.updated_at = datetime.now(UTC)
 
     db.commit()
     return True
@@ -941,7 +967,7 @@ async def reorder_story_items(
         updated_items.append(_build_item_detail(item, generation, profile_name, db))
 
     # Update story updated_at
-    story.updated_at = datetime.utcnow()
+    story.updated_at = datetime.now(UTC)
 
     db.commit()
     return updated_items
@@ -1000,7 +1026,7 @@ async def set_story_item_version(
     # Update story updated_at
     story = db.query(DBStory).filter_by(id=story_id).first()
     if story:
-        story.updated_at = datetime.utcnow()
+        story.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(item)
@@ -1090,15 +1116,162 @@ def _duck_envelope(
 
     envelope = np.repeat(smoothed, frame)[: source.shape[1]]
     return envelope.astype(np.float32)
+@dataclass
+class _Chapter:
+    """Single chapter boundary used when exporting a story to m4b/mp3."""
+
+    start_ms: int
+    end_ms: int
+    title: str
+
+
+# Latin sentences end with [.!?] + whitespace; CJK sentences end with [。！？]
+# and conventionally have no following whitespace, so the boundary is the mark
+# itself. Both lookbehinds are zero-width — split() just consumes whitespace
+# when present.
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|(?<=[。！？])")
+
+
+def _chapter_title_from_text(text: Optional[str], max_len: int = 80) -> str:
+    """Derive a chapter title from the linked generation's text.
+
+    Takes the first sentence (or the leading slice if the sentence is long).
+    """
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return "Chapter"
+    first = _SENTENCE_BREAK.split(cleaned, maxsplit=1)[0].strip()
+    if not first:
+        return "Chapter"
+    if len(first) > max_len:
+        return first[:max_len].rstrip() + "…"
+    return first
+
+
+def _derive_chapters_auto(
+    segments: List[dict],
+    total_duration_ms: int,
+) -> List[_Chapter]:
+    """One chapter per story segment, ordered by start_time_ms.
+
+    Each segment dict must carry ``start_time_ms`` and ``text``. The final
+    chapter runs to ``total_duration_ms``. Segments with identical
+    ``start_time_ms`` are deduped (only the first contributes a chapter
+    boundary) so multi-track items don't produce zero-length chapters.
+    """
+    ordered = sorted(segments, key=lambda s: s["start_time_ms"])
+    chapters: List[_Chapter] = []
+    for seg in ordered:
+        start = int(seg["start_time_ms"])
+        if chapters and chapters[-1].start_ms == start:
+            continue
+        chapters.append(
+            _Chapter(start_ms=start, end_ms=0, title=_chapter_title_from_text(seg.get("text")))
+        )
+    for i, ch in enumerate(chapters):
+        ch.end_ms = chapters[i + 1].start_ms if i + 1 < len(chapters) else total_duration_ms
+    # Skip degenerate trailing chapter that would have zero duration.
+    return [ch for ch in chapters if ch.end_ms > ch.start_ms]
+
+
+def _escape_ffmetadata(value: str) -> str:
+    """Escape a metadata value for an FFMETADATA1 file.
+
+    Per the spec (https://ffmpeg.org/ffmpeg-formats.html#Metadata-1) ``=``,
+    ``;``, ``#``, ``\\``, and literal newlines must be backslash-escaped, or
+    ffmpeg will reject (or silently mangle) the chapter entry.
+    """
+    return (
+        value.replace("\\", "\\\\")
+        .replace("=", "\\=")
+        .replace(";", "\\;")
+        .replace("#", "\\#")
+        .replace("\n", "\\n")
+    )
+
+
+def _write_ffmetadata(chapters: List[_Chapter], path: Path) -> None:
+    """Serialize chapter list to an FFMETADATA1 file ffmpeg can ingest via ``-i``."""
+    lines = [";FFMETADATA1"]
+    for ch in chapters:
+        lines.extend(
+            [
+                "[CHAPTER]",
+                "TIMEBASE=1/1000",
+                f"START={ch.start_ms}",
+                f"END={ch.end_ms}",
+                f"title={_escape_ffmetadata(ch.title)}",
+            ]
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _ffmpeg_encode(
+    wav_path: Path,
+    out_path: Path,
+    fmt: str,
+    chapters: Optional[List[_Chapter]],
+) -> None:
+    """Transcode WAV → fmt with optional embedded chapter metadata.
+
+    Raises RuntimeError on missing ffmpeg or non-zero exit.
+    """
+    meta_path: Optional[Path] = None
+    try:
+        if chapters:
+            meta_path = wav_path.with_suffix(".chapters.txt")
+            _write_ffmetadata(chapters, meta_path)
+        ffmpeg_encode_audio(wav_path, out_path, fmt, metadata_path=meta_path)
+    finally:
+        if meta_path is not None:
+            meta_path.unlink(missing_ok=True)
+
+
+def _make_tempfile(suffix: str) -> Path:
+    """Create a closed-on-return temp file path with the given suffix.
+
+    Uses ``tempfile.mkstemp`` rather than ``NamedTemporaryFile(delete=False).name``
+    so the OS file descriptor is released immediately instead of lingering
+    until garbage collection (Ruff SIM115).
+    """
+    fd, name = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    return Path(name)
+
+
+async def _encode_with_ffmpeg(
+    audio: np.ndarray,
+    sample_rate: int,
+    fmt: str,
+    chapters: Optional[List[_Chapter]],
+) -> bytes:
+    """Transcode the finished mix with ffmpeg, via a temporary WAV.
+
+    Raises ``RuntimeError`` when ffmpeg is missing, times out or fails; the
+    route turns that into a 503 with an install hint.
+    """
+    wav_path = _make_tempfile(suffix=".wav")
+    out_path = _make_tempfile(suffix=FFMPEG_EXPORT_FORMATS[fmt]["ext"])
+    try:
+        wav_path.write_bytes(encode_audio(audio, sample_rate, "wav"))
+        # ffmpeg is CPU-bound and can run for several seconds on a real
+        # audiobook — offload to a worker thread so it doesn't block the
+        # FastAPI event loop while it runs.
+        await asyncio.to_thread(_ffmpeg_encode, wav_path, out_path, fmt, chapters)
+        return out_path.read_bytes()
+    finally:
+        wav_path.unlink(missing_ok=True)
+        out_path.unlink(missing_ok=True)
 
 
 async def export_story_audio(
     story_id: str,
     db: Session,
     fmt: str = "wav",
+    chapters_mode: str = "none",
 ) -> Optional[bytes]:
     """
-    Export story as single mixed audio file with timecode-based mixing.
+    Export story as a single mixed audio file with timecode-based mixing.
 
     Mixes in stereo at the highest sample rate any source actually uses
     (capped at 48 kHz) rather than flattening everything to 24 kHz mono, so an
@@ -1111,7 +1284,12 @@ async def export_story_audio(
     Args:
         story_id: Story ID
         db: Database session
-        fmt: Output container; see ``utils.audio.EXPORT_FORMATS``.
+        fmt: Output container; a key of :data:`STORY_EXPORT_FORMATS`. wav,
+            flac, ogg and opus come straight from libsndfile; mp3 and m4b go
+            through ffmpeg and raise ``RuntimeError`` when it is missing.
+        chapters_mode: "none" (default) leaves chapter metadata off; "auto"
+            derives one chapter per story item, titled from its generation
+            text. Only mp3 and m4b can carry chapters; the rest ignore this.
 
     Returns:
         Audio file bytes or None if story not found
@@ -1159,18 +1337,21 @@ async def export_story_audio(
             logger.warning("Story %s: skipping item %s, decode failed: %s", story_id, item.id, exc)
             continue
 
-        loaded.append((item, _to_stereo(audio), int(sr)))
+        loaded.append((item, generation, _to_stereo(audio), int(sr)))
 
     if not loaded:
         return None
 
-    project_sr = min(max(sr for _item, _audio, sr in loaded), MAX_PROJECT_SAMPLE_RATE)
+    project_sr = min(max(sr for _item, _gen, _audio, sr in loaded), MAX_PROJECT_SAMPLE_RATE)
 
     # --- per-lane submixes --------------------------------------------------
     lanes: dict[int, np.ndarray] = {}
     placements = []
+    # One entry per placed clip, for chapter derivation: where it starts and
+    # the text its chapter title is taken from.
+    segments: List[dict] = []
 
-    for item, audio, sr in loaded:
+    for item, generation, audio, sr in loaded:
         if sr != project_sr:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=project_sr)
 
@@ -1204,6 +1385,7 @@ async def export_story_audio(
             audio = audio * volume
 
         placements.append((item.track, int(item.start_time_ms), audio))
+        segments.append({"start_time_ms": int(item.start_time_ms), "text": generation.text})
 
     if not placements:
         return None
@@ -1271,4 +1453,12 @@ async def export_story_audio(
     if peak > 1.0:
         final_audio /= peak
 
-    return encode_audio(final_audio, project_sr, fmt)
+    fmt = (fmt or "wav").lower()
+    if fmt not in FFMPEG_EXPORT_FORMATS:
+        return encode_audio(final_audio, project_sr, fmt)
+
+    chapters: Optional[List[_Chapter]] = None
+    if chapters_mode == "auto":
+        total_duration_ms = int(total_samples * 1000 / project_sr)
+        chapters = _derive_chapters_auto(segments, total_duration_ms) or None
+    return await _encode_with_ffmpeg(final_audio, project_sr, fmt, chapters)

@@ -14,7 +14,7 @@ from .. import config, models
 from ..services import tts
 from ..database import get_db
 from ..utils import ffmpeg
-from ..utils.platform_detect import get_backend_type, is_amd_gpu_windows
+from ..utils.platform_detect import get_backend_type, is_amd_rocm_capable
 
 router = APIRouter()
 
@@ -187,9 +187,10 @@ async def health():
         vram_used_mb=vram_used,
         backend_type=backend_type,
         backend_variant=os.environ.get("VOICEBOX_BACKEND_VARIANT", default_variant),
-        supports_rocm=is_amd_gpu_windows(),
+        supports_rocm=is_amd_rocm_capable(),
         gpu_compatibility_warning=gpu_compat_warning,
         ffmpeg_available=ffmpeg.is_available(),
+        cloud_enabled=config.is_cloud_enabled(),
     )
 
 
