@@ -132,6 +132,22 @@ async def test_cutting_is_duration_neutral_when_trimmed():
 
 
 @pytest.mark.asyncio
+async def test_multichannel_runs_fold_to_mono_either_way_round():
+    """Engines disagree on layout: (channels, samples) or (samples, channels).
+    Both must fold to one waveform of the run's length, not of its channel count."""
+    mono = padded(0.5)
+    for stereo in (np.stack([mono, mono]), np.stack([mono, mono], axis=1)):
+
+        async def generate_run(node: Speech, stereo=stereo):
+            return stereo, SR
+
+        audio, sr = await render(RenderPlan(nodes=[Speech("x", "en")]), generate_run, trim_runs=False)
+        assert audio.ndim == 1
+        assert len(audio) == len(mono)
+        assert sr == SR
+
+
+@pytest.mark.asyncio
 async def test_a_pause_lasts_as_long_as_it_says():
     plan = RenderPlan(nodes=[Speech("a", "en"), Silence(700), Speech("b", "en")])
     with_pause, sr = await render(plan, fake_engine(), crossfade_ms=0)
