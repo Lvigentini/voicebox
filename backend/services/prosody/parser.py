@@ -35,8 +35,10 @@ _VOID_TAGS = {"break"}
 _SPAN_TAGS = {"lang", "prosody", "emphasis", "sub", "phoneme"}
 _ALL_TAGS = _VOID_TAGS | _SPAN_TAGS
 
+# The lookahead after the name is what keeps the tag set closed: without it
+# "<subject>" would read as a <sub> tag and "<breaking> news" as a pause.
 _TAG_RE = re.compile(
-    r"<\s*(?P<closing>/)?\s*(?P<name>" + "|".join(sorted(_ALL_TAGS)) + r")"
+    r"<\s*(?P<closing>/)?\s*(?P<name>" + "|".join(sorted(_ALL_TAGS)) + r")(?![\w:.-])"
     r"(?P<attrs>[^<>]*?)(?P<void>/)?\s*>",
     re.IGNORECASE,
 )
@@ -199,8 +201,10 @@ def parse(markup: str) -> list[Node]:
     return root.children
 
 
+# Same boundary as _TAG_RE, so parse and strip_markup agree on what a tag is.
 _STRIP_RE = re.compile(
-    r"<\s*/?\s*(?:" + "|".join(sorted(_ALL_TAGS)) + r")(?:[^<>]*?)/?\s*>", re.IGNORECASE
+    r"<\s*/?\s*(?:" + "|".join(sorted(_ALL_TAGS)) + r")(?![\w:.-])(?:[^<>]*?)/?\s*>",
+    re.IGNORECASE,
 )
 
 
