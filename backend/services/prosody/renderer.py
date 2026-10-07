@@ -214,6 +214,50 @@ def assemble(
     return out
 
 
+def _to_mono(audio: np.ndarray) -> np.ndarray:
+    """Fold whatever an engine returned into a 1-D float32 waveform.
+
+    Engines hand back ``(samples,)``, ``(channels, samples)`` or, less often,
+    ``(samples, channels)``. Averaging the wrong axis of the last one would
+    leave a two-sample "waveform", so pick the channel axis by size: nothing
+    here produces more than a handful of channels, and every run has far more
+    samples than that.
+    """
+    audio = np.squeeze(np.asarray(audio, dtype=np.float32))
+    if audio.ndim == 0:
+        return audio.reshape(1)
+    if audio.ndim == 1:
+        return audio
+    if audio.ndim == 2:
+        channel_axis = 0 if audio.shape[0] <= audio.shape[1] else 1
+        return audio.mean(axis=channel_axis).astype(np.float32, copy=False)
+    raise ValueError(f"Cannot fold audio of shape {audio.shape} to mono")
+
+
+def _shape_run(
+    audio: np.ndarray,
+    run_sr: int,
+    sample_rate: int,
+    rate: float,
+    *,
+    trim: bool,
+    lead: bool,
+    trail: bool,
+) -> np.ndarray:
+    """The per-run DSP: fold to mono, match the plan's rate, trim, time-stretch.
+
+    Synchronous on purpose; :func:`render` runs it on a worker thread.
+    """
+    audio = _to_mono(audio)
+    if run_sr != sample_rate:
+        # Mixed rates would otherwise concatenate into a pitch shift.
+        logger.info("Resampling a prosody run from %dHz to %dHz", run_sr, sample_rate)
+        audio = librosa.resample(audio, orig_sr=run_sr, target_sr=sample_rate)
+    if trim:
+        audio = trim_edges(audio, sample_rate, lead=lead, trail=trail)
+    return apply_rate(audio, rate, sample_rate)
+
+
 async def render(
     plan: RenderPlan,
     generate_run,
@@ -263,31 +307,24 @@ async def render(
             continue
 
         audio, run_sr = await generate_run(node)
-        audio = np.asarray(audio, dtype=np.float32)
-        if audio.ndim > 1:
-            audio = audio.mean(axis=0)
 
-        needs_resample = False
         if sample_rate is None:
             sample_rate = int(run_sr)
             if pending_silence_ms:
                 pieces.append((_silence(pending_silence_ms, sample_rate), True))
                 pending_silence_ms = 0
-        elif int(run_sr) != sample_rate:
-            # Mixed rates would otherwise concatenate into a pitch shift.
-            logger.info(
-                "Resampling a prosody run from %dHz to %dHz", int(run_sr), sample_rate
-            )
-            needs_resample = True
 
+        # Resampling, edge trimming and WSOLA are CPU-bound numpy work; inline
+        # they would stall the event loop for every concurrent request.
         audio = await asyncio.to_thread(
-            _post_process_run,
+            _shape_run,
             audio,
-            orig_sr=int(run_sr) if needs_resample else None,
-            sample_rate=sample_rate,
-            rate=node.rate,
-            trim_lead=trim_runs and index != first_speech,
-            trim_trail=trim_runs and index != last_speech,
+            int(run_sr),
+            sample_rate,
+            node.rate,
+            trim=trim_runs,
+            lead=index != first_speech,
+            trail=index != last_speech,
         )
 
         if audio.size:
@@ -304,32 +341,6 @@ async def render(
         await asyncio.to_thread(assemble, pieces, sample_rate, crossfade_ms=crossfade_ms),
         sample_rate,
     )
-
-
-def _post_process_run(
-    audio: np.ndarray,
-    *,
-    orig_sr: int | None,
-    sample_rate: int,
-    rate: float,
-    trim_lead: bool,
-    trim_trail: bool,
-) -> np.ndarray:
-    """Resample, trim the interior edges and time-stretch, off the event loop.
-
-    Every step here is synchronous numpy, and WSOLA alone runs ~0.27s on ten
-    seconds of audio. Left on the loop it stalls every other coroutine in the
-    process for the duration -- including the SSE status stream the UI reads,
-    which is exactly the thing that must keep ticking while a long plan
-    renders.
-
-    Reported by @hakimio on #1036.
-    """
-    if orig_sr is not None:
-        audio = librosa.resample(audio, orig_sr=orig_sr, target_sr=sample_rate)
-    if trim_lead or trim_trail:
-        audio = trim_edges(audio, sample_rate, lead=trim_lead, trail=trim_trail)
-    return apply_rate(audio, rate, sample_rate)
 
 
 def _silence(ms: int, sr: int) -> np.ndarray:

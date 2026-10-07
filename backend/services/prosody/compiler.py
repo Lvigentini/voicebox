@@ -140,37 +140,30 @@ def compile_plan(
             # be lost either -- glue it onto the previous run.
             if plan_nodes and isinstance(plan_nodes[-1], Speech):
                 prev = plan_nodes[-1]
-                # `source_text` has to grow with `text`. Leaving it alone on a
-                # substituted run desynchronises the pair, so a preview shows
-                # the author's words minus whatever whitespace followed the
-                # closing tag -- the preview's whole job is to be faithful.
-                #
-                # Reported by @hakimio on #1036.
                 plan_nodes[-1] = replace(
                     prev,
                     text=prev.text + raw_text,
-                    source_text=(
-                        None if prev.source_text is None else prev.source_text + raw_text
-                    ),
+                    # Keep the recorded original in step with the spoken text,
+                    # or a substituted run's preview shows a diff nobody wrote.
+                    source_text=None if prev.source_text is None else prev.source_text + raw_text,
                 )
             continue
 
         language = attrs.language or default_language
-        if (
-            engine_languages
-            and language not in engine_languages
-            and language not in seen_unsupported_language
-        ):
-            seen_unsupported_language.add(language)
-            warnings.append(
-                PlanWarning(
-                    code="language_unsupported",
-                    detail=(
-                        f"Engine {engine!r} cannot generate {language!r}; that run will be "
-                        f"read as {default_language!r}."
-                    ),
+        if engine_languages and language not in engine_languages:
+            # Warn once per language, but fall back on every run: the warning
+            # promises the default language, so each run has to honour it.
+            if language not in seen_unsupported_language:
+                seen_unsupported_language.add(language)
+                warnings.append(
+                    PlanWarning(
+                        code="language_unsupported",
+                        detail=(
+                            f"Engine {engine!r} cannot generate {language!r}; that run will be "
+                            f"read as {default_language!r}."
+                        ),
+                    )
                 )
-            )
             language = default_language
 
         instruct = base_instruct
