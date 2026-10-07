@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .. import config, models
 from ..services import history, personality, profiles, tts
 from ..database import Generation as DBGeneration, VoiceProfile as DBVoiceProfile, get_db
-from ..services.generation import run_generation
+from ..services.generation import release_generation_memory, run_generation
 from ..services.task_queue import cancel_generation as cancel_generation_job, enqueue_generation
 from ..utils.audio import load_audio
 from ..utils.tasks import get_task_manager
@@ -50,7 +50,7 @@ def _get_or_create_import_profile(db: Session) -> DBVoiceProfile:
 
 
 def _resolve_generation_engine(data: models.GenerationRequest, profile) -> str:
-    return data.engine or getattr(profile, "default_engine", None) or getattr(profile, "preset_engine", None) or "qwen"
+    return data.engine or profiles.default_engine_for_profile(profile)
 
 
 @router.post("/generate", response_model=models.GenerationResponse)
@@ -370,29 +370,32 @@ async def stream_speech(
 
     # The same transformer the persisted path uses, so a streamed preview
     # matches what /generate would produce rather than approximating it.
-    audio, sample_rate = await generate_with_prosody(
-        data.text,
-        engine=engine,
-        language=data.language,
-        generate_chunked_fn=generate_chunked,
-        tts_model=tts_model,
-        voice_prompt=voice_prompt,
-        gen_kwargs=dict(
+    try:
+        audio, sample_rate = await generate_with_prosody(
+            data.text,
+            engine=engine,
             language=data.language,
+            generate_chunked_fn=generate_chunked,
+            tts_model=tts_model,
+            voice_prompt=voice_prompt,
+            gen_kwargs=dict(
+                language=data.language,
+                seed=data.seed,
+                instruct=data.instruct,
+                max_chunk_chars=data.max_chunk_chars,
+                crossfade_ms=data.crossfade_ms,
+                trim_fn=trim_fn,
+                runaway_detector=runaway_detector,
+            ),
+            db=db,
+            profile_id=data.profile_id,
+            supports_instruct=supports_instruct,
+            engine_languages=engine_langs,
             seed=data.seed,
-            instruct=data.instruct,
-            max_chunk_chars=data.max_chunk_chars,
-            crossfade_ms=data.crossfade_ms,
-            trim_fn=trim_fn,
-            runaway_detector=runaway_detector,
-        ),
-        db=db,
-        profile_id=data.profile_id,
-        supports_instruct=supports_instruct,
-        engine_languages=engine_langs,
-        seed=data.seed,
-        enabled=data.prosody,
-    )
+            enabled=data.prosody,
+        )
+    finally:
+        release_generation_memory(tts_model)
 
     effects_chain_config = None
     if data.effects_chain is not None:
