@@ -14,7 +14,7 @@ from .. import config, models
 from ..backends import engine_supports_instruct, get_engine_capabilities
 from ..services import history, personality, profiles, tts
 from ..database import Generation as DBGeneration, VoiceProfile as DBVoiceProfile, get_db
-from ..services.generation import run_generation
+from ..services.generation import release_generation_memory, run_generation
 from ..services.task_queue import cancel_generation as cancel_generation_job, enqueue_generation
 from ..utils.audio import load_audio
 from ..utils.tasks import get_task_manager
@@ -52,7 +52,7 @@ def _get_or_create_import_profile(db: Session) -> DBVoiceProfile:
 
 
 def _resolve_generation_engine(data: models.GenerationRequest, profile) -> str:
-    return data.engine or getattr(profile, "default_engine", None) or getattr(profile, "preset_engine", None) or "qwen"
+    return data.engine or profiles.default_engine_for_profile(profile)
 
 
 def _warn_if_instruct_ignored(instruct: Optional[str], engine: str) -> None:
@@ -388,18 +388,21 @@ async def stream_speech(
 
         runaway_detector = has_tts_runaway
 
-    audio, sample_rate = await generate_chunked(
-        tts_model,
-        data.text,
-        voice_prompt,
-        language=data.language,
-        seed=data.seed,
-        instruct=data.instruct,
-        max_chunk_chars=data.max_chunk_chars,
-        crossfade_ms=data.crossfade_ms,
-        trim_fn=trim_fn,
-        runaway_detector=runaway_detector,
-    )
+    try:
+        audio, sample_rate = await generate_chunked(
+            tts_model,
+            data.text,
+            voice_prompt,
+            language=data.language,
+            seed=data.seed,
+            instruct=data.instruct,
+            max_chunk_chars=data.max_chunk_chars,
+            crossfade_ms=data.crossfade_ms,
+            trim_fn=trim_fn,
+            runaway_detector=runaway_detector,
+        )
+    finally:
+        release_generation_memory(tts_model)
 
     effects_chain_config = None
     if data.effects_chain is not None:
