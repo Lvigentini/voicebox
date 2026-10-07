@@ -720,7 +720,7 @@
       "ogg": "Audio (OGG Vorbis)",
       "opus": "Audio (Opus)",
       "mp3": "Audio (MP3)",
-      "m4b": "Audiobook (M4B, chapters)"
+      "m4b": "Audiobook (M4B, chapters)",      "m4bUnavailable": "Audiobook (M4B) needs ffmpeg"
     },
     "empty": {
       "title": "No items in this story",

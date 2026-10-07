@@ -644,7 +644,7 @@
       "ogg": "Audio (OGG Vorbis)",
       "opus": "Audio (Opus)",
       "mp3": "Audio (MP3)",
-      "m4b": "Audiolibro (M4B, capítulos)"
+      "m4b": "Audiolibro (M4B, capítulos)",      "m4bUnavailable": "Audiolibro (M4B) necesita ffmpeg"
     },
     "empty": {
       "title": "No hay elementos en esta historia",
